@@ -1027,9 +1027,8 @@
       return nameMap ? nameMap.seat(i) : name;
     });
     var stacks = (results.fireworks || []).map(function (height, i) {
-      return '<span class="end-cell">' + CARD_ORDER[i].toUpperCase() + " " +
-        height + "</span>";
-    }).join("");
+      return CARD_ORDER[i].toUpperCase() + " " + height;
+    }).join(" · ");
     var order = names.map(function (_, i) { return i; });
     order.sort(function (a, b) {
       return (results.contributions || [])[b] - (results.contributions || [])[a];
@@ -1039,7 +1038,7 @@
       escapeHtml(reasonLine(results).toUpperCase()) + "</div>" +
       '<div class="end-verdict">' + score + " / 25 · " + verdict(score) +
       "</div>" +
-      '<div class="end-reason">' + stacks + "</div>" +
+      '<div class="end-reason">' + escapeHtml(stacks) + "</div>" +
       '<div class="end-rows">' +
       '<span class="end-head"></span><span class="end-head"></span>' +
       '<span class="end-head">banked</span>' +
