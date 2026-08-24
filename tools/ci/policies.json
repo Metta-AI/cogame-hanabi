@@ -1,0 +1,31 @@
+[
+  {
+    "name": "hanabi-signaler",
+    "run": "/bin/hanabi-player",
+    "env": {
+      "PLAYER_PROMPT": "Play a clear, declarable convention and stick to it so a stranger can decode you. Treat the newest card a hint touches as the card you are being told to play, and treat a hint that touches only the partner's oldest unhinted card as 'that card is precious, do not discard it'. Give play hints when a partner has a card that goes on a stack now; prefer the partner who acts next. Discard your own oldest unhinted card when you have nothing to play and nothing worth hinting. Never spend the last hint token on information a partner already has, and never play a card unless every possibility you hold for it is playable right now. Use your note to record, in one line per partner, what you have told them and what you believe they hold."
+    }
+  },
+  {
+    "name": "hanabi-reader",
+    "run": "/bin/hanabi-player",
+    "env": {
+      "PLAYER_PROMPT": "Assume nothing about your partners' conventions and infer them from the log. Every turn, before you move, ask what the previous hint would have meant if the giver expected you to play, to save, or merely to know; then check what your partners actually did after earlier hints and prefer the reading their behaviour supports. Only play a card when every candidate you hold for it is playable; otherwise buy information or discard your oldest unhinted card. Count the discard pile - a card whose last copy is still in a hand must never be discarded, and a card whose predecessors are all discarded is worthless. Write down in your note the rule you think each partner is following, and change it the moment they contradict it."
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "hanabi-conventions",
+    "run": "/bin/hanabi-player",
+    "env": {
+      "PLAYER_SCRIPTED": "conventions"
+    }
+  },
+  {
+    "name": "hanabi-cautious",
+    "run": "/bin/hanabi-player",
+    "env": {
+      "PLAYER_SCRIPTED": "cautious"
+    }
+  }
+]

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hanabi — renderer text fixture</title>
+<link rel="stylesheet" href="/client/chrome.css">
+<style>
+  /* The fixture squeezes the whole shell through the three widths that
+     matter, so every string the renderer can draw is measured at each of
+     them. #stagebox is the only thing this file adds to the chrome. */
+  #stagebox {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    justify-content: center;
+    background: #0b0906;
+  }
+  #layout { transition: none; }
+</style>
+</head>
+<body>
+<div id="stagebox">
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">HANA<span>BI</span></div>
+      <div id="clock">TURN 0</div>
+      <div id="topright">
+        <span id="statuschip">fixture</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="tokenbar"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    <div id="transport">
+      <div class="scrub" id="scrub"></div>
+      <div class="tbar">
+        <button class="tbtn" id="play">❚❚</button>
+        <span class="tpos" id="pos">0 / 0</span>
+      </div>
+    </div>
+  </div>
+  <div id="hintpane"></div>
+  <div id="feed"></div>
+</div>
+</div>
+<div id="loading" style="display:none"></div>
+<script src="/client/renderer.js"></script>
+<script>
+// WORST-CASE MODEL TEXT. docker_smoke.sh runs with no ANTHROPIC_API_KEY, so
+// every seat in every CI replay is scripted and emits NO banner and NO note —
+// nothing that plays a CI replay ever draws the banner tag (cogchemists,
+// 2026-08-24). This fixture loads the REAL renderer with a synthetic episode
+// whose every seat carries a full 80-rune banner, a full six-line learned
+// block and long alias/policy names, at 360px, 720px and 1280px, and lets
+// viewer_smoke.mjs --strict-text-bounds check that every drawn string lands
+// inside the canvas.
+(function () {
+  "use strict";
+  var WIDTHS = [360, 720, 1280];
+  var COLOURS = ["red", "yellow", "green", "blue", "white"];
+  var BANNER = "holding Widget-of-the-Long-Name's chop while the green four " +
+    "comes back around now";          // 80 runes exactly
+  var NOTE_LINE = "Ratchet slot 1 is a 3 (candidates: red 3, green 3, blue 3, " +
+    "white 3) — hold it";              // 90 runes
+  var NAMES = ["Sprocket", "Gizmo", "Ratchet", "Widget"];
+  var POLICIES = ["hanabi-signaler-champion", "hanabi-reader-champion",
+    "hanabi-conventions-filler", "hanabi-cautious-filler"];
+
+  function card(colour, rank, opts) {
+    opts = opts || {};
+    return {
+      colour: colour, rank: rank,
+      hintColour: opts.hintColour || "",
+      hintRank: opts.hintRank || 0,
+      negColours: opts.negColours || ["blue", "white"],
+      negRanks: opts.negRanks || [1, 2],
+      knownPlayable: !!opts.playable,
+      knownDead: !!opts.dead,
+      chop: !!opts.chop,
+      candidates: opts.candidates === undefined ? 7 : opts.candidates,
+      hintedTurn: opts.hintedTurn === undefined ? 3 : opts.hintedTurn
+    };
+  }
+
+  function seat(i, turn) {
+    var hand = [];
+    for (var s = 0; s < 4; s++) {
+      hand.push(card(COLOURS[(i + s) % 5], 1 + ((turn + s) % 5), {
+        hintColour: s === 0 ? COLOURS[(i + s) % 5] : "",
+        hintRank: s === 1 ? 1 + ((turn + s) % 5) : 0,
+        playable: s === 0,
+        dead: s === 2,
+        chop: s === 3,
+        candidates: s === 0 ? 1 : 6
+      }));
+    }
+    return {
+      name: NAMES[i], seat: i, color: i, acting: (turn % 4) === i,
+      hand: hand, plays: 2 + i, misplays: i % 3, discards: 3, hints: 4 + i,
+      contribution: 2, banner: BANNER,
+      origin: i === 3 ? "fallback" : "llm", fallbacks: i === 3 ? 2 : 0
+    };
+  }
+
+  var events = [];
+  var frames = [];
+  events.push({ kind: "start", text: "hanabi", seed: 7, seats: 4,
+    handSize: 4, maxTurns: 80 });
+  function frameFor(turn, move) {
+    var seats = [];
+    for (var i = 0; i < 4; i++) seats.push(seat(i, turn));
+    return {
+      seats: seats,
+      fireworks: [Math.min(5, turn % 6), 1, 2, 3, Math.min(5, turn % 4)],
+      discards: [{ colour: "red", rank: 1, count: 2 },
+        { colour: "white", rank: 4, count: 1 },
+        { colour: "blue", rank: 2, count: 1 }],
+      hintTokens: Math.max(0, 8 - (turn % 9)), maxHintTokens: 8,
+      fuses: Math.max(1, 3 - (turn % 3)), maxFuses: 3,
+      deck: Math.max(0, 34 - turn), countdown: turn > 34 ? 4 : -1,
+      turn: turn, maxTurns: 80, actor: turn % 4,
+      score: Math.min(25, turn), move: move || null, log: [],
+      phase: "turn", gameDone: false, reason: "", endReason: ""
+    };
+  }
+  frames.push(frameFor(0, null));
+  for (var turn = 0; turn < 40; turn++) {
+    var seatIndex = turn % 4;
+    var move;
+    if (turn % 4 === 0) {
+      move = { kind: "move", turn: turn, seat: seatIndex, action: "hint",
+        target: (seatIndex + 1) % 4, hintType: "rank", hintValue: "3",
+        touched: [1, 3], untouched: [2, 4],
+        learned: [NOTE_LINE, NOTE_LINE, NOTE_LINE, NOTE_LINE, NOTE_LINE,
+          NOTE_LINE],
+        nowPlayable: [1], nowDead: [4], nowCritical: [3],
+        result: "hint", fizzle: false, slot: 0, card: null,
+        hintTokens: 5, fuses: 2, deck: 17, countdown: -1, score: turn,
+        origin: "llm", scripted: false, text: NOTE_LINE, banner: BANNER };
+    } else if (turn % 4 === 1) {
+      move = { kind: "move", turn: turn, seat: seatIndex, action: "play",
+        slot: 1, card: { colour: "green", rank: (turn % 5) + 1 },
+        result: "stack", fizzle: false, target: -1, learned: [],
+        hintTokens: 5, fuses: 2, deck: 16, countdown: -1, score: turn,
+        origin: "retry", scripted: false, text: NOTE_LINE, banner: BANNER };
+    } else if (turn % 4 === 2) {
+      move = { kind: "move", turn: turn, seat: seatIndex, action: "play",
+        slot: 2, card: { colour: "blue", rank: 4 },
+        result: "misplay", fizzle: true, target: -1,
+        learned: ["the last blue 4 — blue can never pass 3"],
+        hintTokens: 5, fuses: 2, deck: 15, countdown: -1, score: turn,
+        origin: "fallback", scripted: true, text: "", banner: BANNER };
+    } else {
+      move = { kind: "move", turn: turn, seat: seatIndex, action: "discard",
+        slot: 4, card: { colour: "white", rank: 4 },
+        result: "discarded", fizzle: false, target: -1,
+        learned: ["the last white 4 — white can never pass 3"],
+        hintTokens: 6, fuses: 2, deck: 14, countdown: turn > 34 ? 4 : -1,
+        score: turn, origin: "scripted", scripted: true, text: "",
+        banner: BANNER };
+    }
+    events.push(move);
+    frames.push(frameFor(turn + 1, move));
+  }
+  events.push({ kind: "end", turn: 40, text: "complete",
+    endReason: "deckout", score: 19, fireworks: [4, 4, 4, 4, 3],
+    hintTokens: 3, fuses: 2, deck: 0, digest: "fixture" });
+  frames.push(frameFor(40, null));
+
+  var payload = {
+    protocol: "hanabi.replay.v1",
+    names: NAMES,
+    policyNames: POLICIES,
+    config: { maxTurns: 80, seed: 7, sampled: true },
+    events: events,
+    frames: frames,
+    results: {
+      names: POLICIES, scores: [19, 19, 19, 19], score: 19,
+      fireworks: [4, 4, 4, 4, 3], contributions: [3, 2, 1, 0],
+      plays: [4, 3, 2, 1], misplays: [0, 1, 0, 1], discards: [2, 3, 4, 5],
+      hints: [5, 4, 3, 2], fallbacks: [0, 0, 0, 2], turns: 40, maxTurns: 80,
+      deckLeft: 0, endReason: "deckout", reason: "complete"
+    }
+  };
+
+  var canvas = document.getElementById("table");
+  var box = document.getElementById("layout");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  function relayout() {
+    var transport = document.getElementById("transport");
+    var band = transport ? transport.offsetHeight : 0;
+    var root = document.documentElement;
+    root.style.setProperty("--band", band + "px");
+    root.style.setProperty("--hudscale",
+      String(Math.max(0.8, Math.min(box.clientWidth / 960, 1.15))));
+    fit();
+  }
+  var widthIndex = 0;
+  function cycle() {
+    box.style.width = WIDTHS[widthIndex % WIDTHS.length] + "px";
+    widthIndex += 1;
+    relayout();
+    window.setTimeout(cycle, 900);
+  }
+  window.addEventListener("resize", relayout);
+  cycle();
+  HanabiRenderer.attachReplay({
+    canvas: canvas,
+    feed: document.getElementById("feed"),
+    hintpane: document.getElementById("hintpane"),
+    tokenbar: document.getElementById("tokenbar"),
+    scrub: document.getElementById("scrub"),
+    playButton: document.getElementById("play"),
+    label: document.getElementById("pos"),
+    clock: document.getElementById("clock"),
+    scorebug: document.getElementById("scorebug"),
+    endscreen: document.getElementById("endscreen"),
+    assetBase: "/data",
+    payload: payload
+  });
+})();
+</script>
+</body>
+</html>
