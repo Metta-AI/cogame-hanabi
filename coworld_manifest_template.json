@@ -1,0 +1,453 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Metta-AI/coworld/main/src/coworld/coworld_manifest_schema.json",
+  "tags": [
+    "card-game",
+    "cooperative",
+    "hidden-information",
+    "theory-of-mind",
+    "hanabi",
+    "llm-driven",
+    "turn-based",
+    "four-player"
+  ],
+  "game": {
+    "name": "hanabi",
+    "replay_viewer": {
+      "bundle": "static-replay-viewer"
+    },
+    "description": "Hanabi for four LLM-piloted cogs: the canonical ad-hoc-teamwork benchmark. Each seat holds four cards FACING OUT - everyone can see them except their owner - and the table builds five colour-ordered firework stacks out of a seeded 50-card deck (five colours, ranks 1 1 1 2 2 3 3 4 4 5). On your turn you do exactly one of three things: play a card, discard one (which returns a hint token), or spend one of the eight hint tokens to tell another seat every card of one colour or one rank they hold. Three misplays end the game; so does finishing all five fireworks; when the last card is drawn every seat takes one more turn. The score is the sum of the five stack heights, 0 to 25, and it is the SAME number for every seat - this game is fully cooperative, so read the division leaderboard's mean SCORE, not the Elo spread, which cannot separate two champions who always tie. The whole skill is the theory of mind around hints: what did that hint mean, and what does the partner think it meant? The game is LLM-driven: on a seat's turn the server sends that seat's policy prompt plus the partners' hands, its own hand as KNOWLEDGE ONLY (positive hints, negative information, the candidate set), the full public move log and an enumerated list of every legal move to Claude, so A POLICY IS JUST A PROMPT - build one by reusing the published player runnable and setting the PLAYER_PROMPT environment variable to your conventions. Two scripted baselines (conventions and cautious) play any seat that registers as scripted - and every seat when no LLM credentials are available, so episodes always complete.",
+    "owner": "daveey@gmail.com",
+    "runnable": {
+      "type": "game",
+      "image": "{{HANABI_IMAGE}}",
+      "run": [
+        "/bin/hanabi"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY_URI": "secret://coworld/hanabi/anthropic_api_key"
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-hanabi/tree/main"
+    },
+    "config_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tokens",
+        "players"
+      ],
+      "properties": {
+        "tokens": {
+          "description": "One connection token per player slot, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "players": {
+          "description": "One player display-name object per seat, indexed by slot.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "num_agents": {
+          "description": "Seat count; injected by the commissioner. Hanabi here is the standard four-player deal, hand size 4.",
+          "type": "integer",
+          "minimum": 4,
+          "maximum": 4
+        },
+        "seed": {
+          "description": "Pins the deck shuffle, the deal and the seat aliases. Omit for a fresh random seed per episode.",
+          "type": "integer"
+        },
+        "maxTurns": {
+          "description": "Hard cap on turns played. One seat acts per turn, seats in order; 89 turns is the theoretical maximum of a four-player game, so the default only truncates a game that has already spent half its turns on hints (reported as endReason turnlimit).",
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 120,
+          "default": 80
+        },
+        "episodeTimeoutSeconds": {
+          "description": "Wall-clock the game assumes the platform allows an episode when COWORLD_TIMEOUT_SECONDS is not in its environment; play stops between turns at 60% of it so results and the replay always land.",
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 6000,
+          "default": 1200
+        },
+        "turnDelayMs": {
+          "description": "Spectator pacing delay between turns.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "default": 150
+        },
+        "model": {
+          "description": "Claude model for the direct-Anthropic transport (ANTHROPIC_API_KEY). Hosted Bedrock ignores this and rotates through its own haiku-first candidate list; set BEDROCK_MODEL to pin one.",
+          "type": "string",
+          "default": "claude-sonnet-5"
+        },
+        "maxOutputTokens": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 2000,
+          "default": 800
+        },
+        "llmTimeoutSeconds": {
+          "description": "Per-request timeout. Turns are sequential here, so this is deliberately short: two attempts plus the request-spacing floor must fit inside the 45s reserved before each turn.",
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 300,
+          "default": 20
+        },
+        "player_connect_timeout_seconds": {
+          "type": "number",
+          "minimum": 0,
+          "default": 180
+        }
+      }
+    },
+    "results_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "names",
+        "scores",
+        "score",
+        "fireworks",
+        "turns",
+        "maxTurns",
+        "endReason",
+        "reason"
+      ],
+      "properties": {
+        "names": {
+          "description": "Policy display names, indexed by slot. Seats play under anonymous cog aliases in-game; results attribute by policy name.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "string"
+          }
+        },
+        "scores": {
+          "description": "The team score, identical for every seat, higher is better: the sum of the five firework stack heights when the episode ended, 0..25.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 25
+          }
+        },
+        "score": {
+          "description": "The team score once more, as a scalar.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 25
+        },
+        "fireworks": {
+          "description": "The five stack heights in deck order: red, yellow, green, blue, white.",
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          }
+        },
+        "contributions": {
+          "description": "Cards this seat banked minus its misplays. Display and endcard ordering ONLY - never summed into scores, because paying a seat for its own plays is exactly the incentive that breaks Hanabi.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer"
+          }
+        },
+        "plays": {
+          "description": "Cards this seat successfully banked on a stack.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "misplays": {
+          "description": "Fuses this seat burned.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "discards": {
+          "description": "Cards this seat discarded.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "hints": {
+          "description": "Hints this seat gave.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "fallbacks": {
+          "description": "Turns on which this seat's model reply was rejected twice and the conventions baseline moved for it.",
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "turns": {
+          "description": "Turns actually played.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxTurns": {
+          "description": "The episode's turn cap after budget fitting.",
+          "type": "integer",
+          "minimum": 20
+        },
+        "deckLeft": {
+          "description": "Cards still in the deck when the episode ended.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "endReason": {
+          "description": "Which ending fired: perfect | strikeout | deckout | turnlimit | deadline.",
+          "type": "string"
+        },
+        "reason": {
+          "description": "How the episode ended: complete (a terminal state under the rules) or deadline (the episode clock stopped play between turns; the score is the stacks as they stand).",
+          "type": "string"
+        }
+      }
+    },
+    "protocols": {
+      "player": {
+        "type": "text",
+        "value": "hanabi.player.v1 - JSON text frames over the websocket named by COWORLD_PLAYER_WS_URL (already carrying ?slot=N&token=T). A Hanabi policy is a PROMPT: the player container's only job is to deliver it; the game server makes every decision by sending that prompt plus the seat's observation to Claude on that seat's turn, one request per turn. game->player frames: {\"type\":\"welcome\",\"protocol\":\"hanabi.player.v1\",\"slot\":N,\"name\":alias,\"seats\":4,\"handSize\":4,\"maxTurns\":int} on connect; {\"type\":\"state\",\"slot\":N,\"name\":alias,\"yourTurn\":bool,\"turn\":int,\"maxTurns\":int,\"observation\":str,\"score\":int,\"hintTokens\":int,\"fuses\":int,\"deck\":int,\"started\":bool,\"done\":bool,\"reason\":str} after every event - REDACTED to that seat: the observation carries the other three hands face-up, this seat's own hand as KNOWLEDGE ONLY (positive hints, negative information, the candidate set, knownPlayable/knownDead, the chop), the fireworks, the discard pile, the tokens, the full public move log and the enumerated LEGAL MOVES, and it never contains this seat's own card identities, the deck, another seat's notes or banner, a policy name or the seed; {\"type\":\"final\",\"done\":true,\"slot\":N,\"scores\":[4],\"score\":int,\"fireworks\":[5],\"names\":[aliases],\"turns\":int,\"endReason\":str,\"reason\":str} at episode end, after which the player should exit. player->game frames: {\"type\":\"prompt\",\"prompt\":str,\"scripted\":str} - the prompt (max 4000 runes) is the policy, sent right after connecting and again after welcome; scripted \"conventions\" (or \"1\") plays the built-in convention-following baseline for that seat, \"cautious\" the never-misplays baseline, \"\" means LLM-driven. The reference player reads PLAYER_PROMPT and PLAYER_SCRIPTED from its environment."
+      },
+      "global": {
+        "type": "text",
+        "value": "Global spectators connect a websocket to /global and receive the full snapshot as JSON after every move - spectators see EVERY hand, which no seat ever does: {\"type\":\"state\",\"game\":\"hanabi\",\"seats\":[{name,seat,color,acting,hand:[{colour,rank,hintColour,hintRank,negColours,negRanks,knownPlayable,knownDead,chop,candidates,hintedTurn}],plays,misplays,discards,hints,contribution,banner,origin,fallbacks} x4],\"fireworks\":[5 stack heights in deck order red,yellow,green,blue,white],\"discards\":[{colour,rank,count}],\"hintTokens\":int,\"maxHintTokens\":8,\"fuses\":int,\"maxFuses\":3,\"deck\":int,\"countdown\":int,\"turn\":int,\"maxTurns\":int,\"actor\":int,\"score\":int,\"move\":<the move event that produced this state|null>,\"log\":[str],\"phase\":turn|done,\"gameDone\":bool,\"reason\":str,\"endReason\":str,\"policyNames\":[...],\"events\":[...],\"started\":bool,\"done\":bool,\"connected\":[bool]}. The events array is append-only and carries the whole transcript in exactly three kinds: start (seed, seats, handSize, maxTurns), move (one per turn: seat, action play|discard|hint, slot and the revealed card, or target/hintType/hintValue/touched/untouched plus the annotation learned/nowPlayable/nowDead/nowCritical, then hintTokens/fuses/deck/countdown/score, origin llm|retry|fallback|scripted, the seat's note and its spectator-only banner) and end (turn, text complete|deadline, endReason, score, fireworks, digest). Per-turn state is NOT stored: the static replay bundle re-derives every frame from the seed and the moves with the same Nim rules the server runs, and checks the FNV-1a digest. The browser page at /client/global renders the table live; the static replay viewer bundle renders recorded episodes (index.html?replay=<url>)."
+      }
+    },
+    "docs": {
+      "readme": {
+        "type": "text",
+        "value": "Hanabi: four cogs, one 50-card deck, and nobody can see their own cards. Each seat holds four cards facing out; the table builds five colour-ordered firework stacks. On your turn you play a card, discard one (returning a hint token), or spend one of eight hint tokens to tell another seat every card of one colour or one rank they hold - that is the ONLY channel between you. Three misplays end the game, and the score is the sum of the five stacks, 0 to 25, the same number for every seat. A policy is just a prompt: field one by reusing the published hanabi-player runnable with PLAYER_PROMPT set to your conventions, and the game server will send your prompt, the partners' hands, your own hand as knowledge only and the enumerated legal moves to Claude on your turn. Two scripted baselines (conventions, cautious) play any seat that registers scripted - and every seat when no LLM credentials are present, so episodes always complete. Because the score is the team's, the league ranks by MEAN SCORE over episodes, not by Elo: two champions who always tie head-to-head never separate on Elo."
+      },
+      "pages": [
+        {
+          "id": "rules.md",
+          "title": "rules.md",
+          "content": {
+            "type": "text",
+            "value": "# Hanabi rules\n\n## The deck and the deal\n\n- 50 cards: five colours - red, yellow, green, blue, white - each with ranks 1 1 1 2 2 3 3 4 4 5 (three 1s, two each of 2, 3 and 4, one 5).\n- The shuffle is a pure function of the episode seed, so a replay re-derives every card.\n- Four seats, four cards each, dealt one at a time seats 0 to 3. 34 cards are left in the deck.\n- Slots are 1..4, left to right: slot 1 is the NEWEST card, the highest-numbered slot the oldest. You hold your cards facing OUT - the other three seats see them, you never do.\n\n## Your turn\n\nThe seat acting on turn t is `t mod 4`. You do exactly one of three things:\n\n| Action | Fields | Legal when |\n|---|---|---|\n| `play` | `slot` 1..hand size | always |\n| `discard` | `slot` 1..hand size | hint tokens <= 7 (a discard at 8 is illegal) |\n| `hint` | `target` (not yourself), `hintType` colour or rank, `hintValue` | at least 1 hint token AND the hint touches at least one card in the target's hand |\n\nThe enumerated list of every legal move is printed in your prompt every turn; copy one of those objects exactly. That list is the legality rule - nothing else is accepted.\n\n## Resolution, in order\n\n1. `hint`: spend one token. Every card of that colour/rank in the target's hand is marked positively, and every other card in that hand records the negative - which cards a hint did NOT touch is information too.\n2. `play`: remove the card. If its rank is exactly one more than its colour's stack the stack advances; completing a stack at 5 returns one hint token (only if you are below 8). Otherwise it is a misplay: the card is discarded and one fuse burns.\n3. `discard`: the card goes to the pile and one hint token comes back.\n4. Draw (play and discard only): the deck's top card enters slot 1 and the others shift one slot higher. With an empty deck nothing is drawn and the hand gets shorter - slots renumber.\n5. Countdown: when the deck empties the countdown arms at 4, so every seat including the one who drew the last card takes exactly one more turn.\n6. Endings, in this order: three misplays -> `strikeout`; all 25 -> `perfect`; countdown expired -> `deckout`; the turn cap -> `turnlimit`. The episode clock can also stop play between turns -> `deadline`.\n\n## Scoring\n\n`score = red + yellow + green + blue + white` stack heights, 0..25 - including after a strikeout. Every seat gets the SAME score: you win or lose together. `contributions` (cards a seat banked minus its misplays) is reported for display only and is never ranked. The league ranks by mean team score over episodes.\n\n## Configuration\n\n`maxTurns` defaults to 80 (20..120); one seat acts per turn, so 80 turns is 80 model requests at most. `turnDelayMs` paces the spectator view. `seed` pins the deal."
+          }
+        },
+        {
+          "id": "hints-and-knowledge.md",
+          "title": "hints-and-knowledge.md",
+          "content": {
+            "type": "text",
+            "value": "# Hints, knowledge and what your prompt actually sees\n\n## What a card knows about itself\n\nEvery card in every hand carries, from its holder's point of view: the positive colour hint and the positive rank hint it has received; the colours and ranks that hints have PROVEN it is not (because a hint marks every matching card, so an untouched card is not that colour/rank); and the turn a hint last touched it.\n\nFrom those the game derives a **candidate set**: every (colour, rank) consistent with the positive hints, not excluded by the negative information, and with at least one copy the holder cannot already see. `remainingCopies` counts the copies of a card the holder cannot see: the total minus the fireworks, minus the discard pile, minus the other seats' hands, minus its own cards that are already pinned to a single identity by hints alone. This is ONE pass, no fixpoint: there is no multi-card constraint propagation and no reasoning about what a partner would have hinted. If you want that, do it in your prompt.\n\nTwo predicates fall out and appear on every slot:\n\n- **knownPlayable** - every candidate is playable on its stack right now. Playing one of these can never misplay.\n- **knownDead** - every candidate is already played, or is stranded above a rank whose copies are all in the discard pile. Discarding one of these costs nothing.\n\nAnd one table fact, used by the spectator annotation and the baselines: a card is **critical** when it is the last copy still in play and not dead.\n\n**Chop** = the highest-numbered slot with no positive hint of either kind; if every slot carries a hint, the highest-numbered known-dead slot; failing that the oldest card. The chop is a derived quantity shown to you and drawn in the viewer - nothing forces you to discard it.\n\n## What your observation contains\n\nEvery turn, your prompt carries exactly:\n\n- The turn number and the cap, the score, the hint tokens, the fuses, the deck count and the endgame countdown when it is armed.\n- The five fireworks and the whole discard pile, grouped.\n- The other three seats' hands FACE-UP in slot order, each card as `red 3` plus what that holder knows about it.\n- YOUR hand as knowledge only: per slot the positive hints, the negative information, the candidate set (listed at six or fewer, otherwise counted), the knownPlayable/knownDead flags, the chop marker and the turn it was last touched.\n- The complete public move log, one line per turn since turn 0, with the revealed identity of every card played or discarded.\n- `LEGAL MOVES`: every legal move, numbered, each printed as the exact JSON object to copy.\n- Your own private note from earlier turns, verbatim.\n- Your operator's prompt.\n\nIt never contains: the identity of any of your own cards, the deck, another seat's note or banner, the mapping from alias to policy name, or the seed. There is no chat channel - a hint is the only thing you can say.\n\n## The reply\n\nOne flat JSON object, copied from LEGAL MOVES, optionally with `note` (400 runes, private, fed back to you next turn) and `banner` (80 runes, shown to SPECTATORS only - your partners never see it, which is exactly why it cannot become a side channel):\n\n```json\n{\"action\":\"hint\",\"target\":2,\"hintType\":\"rank\",\"hintValue\":\"3\",\"note\":\"...\",\"banner\":\"...\"}\n{\"action\":\"play\",\"slot\":1}\n{\"action\":\"discard\",\"slot\":4}\n```\n\nThe parser is tolerant: markdown fences, a trailing sentence, `{\"move\":\"play 2\"}`, an alias instead of a seat number, `color`/`number` spellings and numeric strings all normalise. Anything else is rejected with a specific reason, retried ONCE with that reason quoted, and then the `conventions` baseline moves for you and the turn is recorded with `origin: fallback`.\n\n## The two scripted baselines\n\n**conventions** (also the fallback move, and every seat when there are no credentials) plays the first rule that fires:\n\n1. Play the lowest-numbered knownPlayable slot.\n2. If the next seat to act has a critical card on its chop, hint that card's RANK to that seat.\n3. Otherwise give the legal hint that makes the most of the receiver's cards NEWLY knownPlayable (at least one); ties break by the seat acting soonest, then rank before colour, then the lower value, then the lower seat.\n4. Otherwise discard the chop.\n5. Otherwise (only at 8 tokens with nothing to say) give the legal hint touching the fewest cards of the next seat.\n\n**cautious** never misplays:\n\n1. Play only a slot whose candidate set is a single card that is playable now.\n2. Otherwise hint the rank of a currently-playable card that carries no positive hint at all, preferring the next seat to act.\n3. Otherwise discard the chop.\n4. Otherwise hint the rank of the next seat's oldest card.\n\nBoth are deterministic pure functions of the position and neither ever proposes a move outside the legal list. `conventions` beats `cautious` on mean score; a prompt that cannot beat `conventions` is not yet a policy."
+          }
+        }
+      ]
+    }
+  },
+  "player": [
+    {
+      "id": "hanabi-player",
+      "name": "Hanabi Prompt Player",
+      "type": "player",
+      "description": "The reference Hanabi policy: delivers its PLAYER_PROMPT (or a default convention-light strategy in words) to the game and spectates until the final frame. Field your own policy by uploading this same image with a different PLAYER_PROMPT.",
+      "image": "{{HANABI_IMAGE}}",
+      "run": [
+        "/bin/hanabi-player"
+      ],
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-hanabi/tree/main"
+    },
+    {
+      "id": "hanabi-conventions",
+      "name": "Hanabi Conventions Baseline",
+      "type": "player",
+      "description": "The scripted convention-following baseline as a fieldable policy: play what you can prove, save a partner's last copy off its chop, otherwise give the hint that makes the most cards newly playable, otherwise discard your chop. Deterministic, no LLM involved.",
+      "image": "{{HANABI_IMAGE}}",
+      "run": [
+        "/bin/hanabi-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "conventions"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-hanabi/tree/main"
+    },
+    {
+      "id": "hanabi-cautious",
+      "name": "Hanabi Cautious Baseline",
+      "type": "player",
+      "description": "The deliberately simpler partner of the cross-play story: it plays only a card it can name exactly, hints ranks of playable cards nobody has been told about, and otherwise discards its chop. It never misplays, and it never takes a risk that would score either.",
+      "image": "{{HANABI_IMAGE}}",
+      "run": [
+        "/bin/hanabi-player"
+      ],
+      "env": {
+        "PLAYER_SCRIPTED": "cautious"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-hanabi/tree/main"
+    }
+  ],
+  "variants": [
+    {
+      "id": "standard",
+      "name": "Standard game",
+      "description": "Four cogs, one 50-card deck, up to 80 turns of hints and fireworks.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "maxTurns": 80,
+        "turnDelayMs": 150,
+        "player_connect_timeout_seconds": 180
+      }
+    },
+    {
+      "id": "sprint",
+      "name": "Sprint",
+      "description": "The same deal with only 48 turns: bank what you can before the clock.",
+      "game_config": {
+        "players": [
+          {
+            "name": "Player1"
+          },
+          {
+            "name": "Player2"
+          },
+          {
+            "name": "Player3"
+          },
+          {
+            "name": "Player4"
+          }
+        ],
+        "num_agents": 4,
+        "maxTurns": 48,
+        "turnDelayMs": 80,
+        "player_connect_timeout_seconds": 180
+      }
+    }
+  ],
+  "certification": {
+    "game_config": {
+      "players": [
+        {
+          "name": "Sprocket"
+        },
+        {
+          "name": "Gizmo"
+        },
+        {
+          "name": "Ratchet"
+        },
+        {
+          "name": "Widget"
+        }
+      ],
+      "num_agents": 4,
+      "seed": 7,
+      "maxTurns": 24,
+      "turnDelayMs": 0,
+      "player_connect_timeout_seconds": 180
+    },
+    "players": [
+      {
+        "player_id": "hanabi-player"
+      },
+      {
+        "player_id": "hanabi-conventions"
+      },
+      {
+        "player_id": "hanabi-player"
+      },
+      {
+        "player_id": "hanabi-cautious"
+      }
+    ]
+  }
+}
