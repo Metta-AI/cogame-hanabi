@@ -1,0 +1,7 @@
+services:
+  hanabi:
+    image: coworld-hanabi:latest
+    platform: linux/amd64
+    build:
+      context: .
+      network: host
