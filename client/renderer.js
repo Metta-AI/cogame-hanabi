@@ -1144,7 +1144,20 @@
               buildHanabiHintPane(options.hintpane, latest.move, nameMap);
             }
             if (data.type === "final") {
-              updateEndscreen(options.endscreen, data, true, nameMap);
+              // The final PLAYER frame carries the team's numbers only (the
+              // protocol is deliberately small); the per-seat tallies for
+              // the endcard come from the last spectator snapshot.
+              var summary = Object.assign({}, data);
+              if (latest && latest.seats) {
+                ["plays", "misplays", "hints", "discards", "contribution"]
+                  .forEach(function (key) {
+                    var field = key === "contribution" ? "contributions" : key;
+                    summary[field] = latest.seats.map(function (seat) {
+                      return seat[key] || 0;
+                    });
+                  });
+              }
+              updateEndscreen(options.endscreen, summary, true, nameMap);
             }
             if (latest && (latest.done || latest.gameDone)) {
               setStatus("final", false);
