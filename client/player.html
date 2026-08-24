@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hanabi — Player View</title>
+<link rel="stylesheet" href="/client/chrome.css">
+</head>
+<body>
+<div id="layout">
+  <div id="stage">
+    <div id="topband">
+      <div id="wordmark">HANA<span>BI</span></div>
+      <div id="clock">TURN 0</div>
+      <div id="topright">
+        <span id="statuschip">connecting…</span>
+        <button id="feedtoggle">LOG »</button>
+      </div>
+    </div>
+    <div id="scorebug"></div>
+    <div id="tokenbar"></div>
+    <div id="board-wrap">
+      <canvas id="table" width="960" height="640"></canvas>
+      <div id="lightpool"></div>
+      <div id="grain"></div>
+      <div id="endscreen"></div>
+    </div>
+    </div>
+  <div id="hintpane"></div>
+  <div id="feed"></div>
+</div>
+<script src="/client/renderer.js"></script>
+<script>
+  // A Hanabi policy is a PROMPT: the player container delivers it and the
+  // game server decides. This page is therefore view-only and deliberately
+  // does NOT open the /player websocket — a browser holding a seat's socket
+  // would take that seat's slot away from its policy container. It watches
+  // the open spectator feed instead.
+  var canvas = document.getElementById("table");
+  function fit() {
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+  }
+  function relayout() {
+    var transport = document.getElementById("transport");
+    var band = transport ? transport.offsetHeight : 0;
+    var root = document.documentElement;
+    root.style.setProperty("--band", band + "px");
+    root.style.setProperty("--hudscale",
+      String(Math.max(0.8, Math.min(window.innerWidth / 960, 1.15))));
+    fit();
+  }
+  window.addEventListener("resize", relayout);
+  window.addEventListener("load", relayout);
+  relayout();
+  HanabiRenderer.bindFeedToggle(document.getElementById("feedtoggle"));
+  var params = new URLSearchParams(location.search);
+  HanabiRenderer.attachLive({
+    canvas: canvas,
+    feed: document.getElementById("feed"),
+    hintpane: document.getElementById("hintpane"),
+    tokenbar: document.getElementById("tokenbar"),
+    status: document.getElementById("statuschip"),
+    clock: document.getElementById("clock"),
+    scorebug: document.getElementById("scorebug"),
+    endscreen: document.getElementById("endscreen"),
+    assetBase: "/client/assets",
+    wsPath: "/global",
+    onFrame: function (data) {
+      if (data.type === "state" && data.seats) {
+        var slot = parseInt(params.get("slot") || "0", 10);
+        var seat = data.seats[slot];
+        if (seat) {
+          document.getElementById("wordmark").innerHTML =
+            "HANA<span>BI</span> — " + seat.name;
+        }
+      }
+    }
+  });
+</script>
+</body>
+</html>
