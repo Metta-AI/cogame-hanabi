@@ -377,6 +377,13 @@ proc userPrompt*(sim: Sim, seat: int, prompt: string): string =
 
 # ---- Reply parsing ----------------------------------------------------------
 
+proc headRunes(text: string, limit: int): string =
+  ## The head of an untrusted string, cut on a RUNE boundary. A byte slice
+  ## through a multi-byte character leaves invalid UTF-8 in the retry prompt
+  ## and on stdout; cleanText only re-cuts strings longer than its cap, so a
+  ## short-but-broken head would pass straight through it.
+  if text.runeLen <= limit: text else: text.runeSubStr(0, limit)
+
 proc cleanText*(text: string, limit: int): string =
   ## Text over the cap is cut at a RUNE boundary with the cut marked: a byte
   ## slice through a multi-byte character leaves invalid UTF-8 in the replay
@@ -404,9 +411,7 @@ proc extractJsonObject*(text: string): JsonNode =
     body = body.strip()
   let start = body.find('{')
   if start < 0:
-    var head = body
-    if head.len > 160:
-      head = head[0 ..< 160] & "..."
+    let head = headRunes(body, 160)
     raise newException(HanabiError, "no JSON object in response: " &
       head.replace("\n", " "))
   var depth = 0
@@ -609,7 +614,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
   if error.len > 0:
     raise newException(HanabiError, "llm transport: " & error)
   if response.code == 401 or response.code == 403:
-    let detail = response.body[0 .. min(response.body.high, 400)]
+    let detail = headRunes(response.body, 400)
     if "Model access is denied" in response.body and
         client.tryNextBedrockModel("no model access"):
       raise newException(HanabiError,
@@ -618,12 +623,12 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
     raise newException(HanabiError,
       "llm auth failed (" & $response.code & ") at " & url & ": " & detail)
   if response.code == 429:
-    let detail = response.body[0 .. min(response.body.high, 300)]
+    let detail = headRunes(response.body, 300)
     discard client.tryNextBedrockModel("throttled")
     raise newException(HanabiError, "llm throttled (429): " & detail)
   if response.code < 200 or response.code >= 300:
     raise newException(HanabiError, "anthropic error " & $response.code &
-      ": " & response.body[0 .. min(response.body.high, 300)])
+      ": " & headRunes(response.body, 300))
   let payload = parseJson(response.body)
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(HanabiError, "anthropic refusal")
@@ -632,7 +637,7 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
       result.add(contentBlock{"text"}.getStr())
   if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
     raise newException(HanabiError, "reply cut off at max_tokens before " &
-      "any JSON: " & result[0 .. min(result.high, 160)].replace("\n", " "))
+      "any JSON: " & headRunes(result, 160).replace("\n", " "))
 
 proc spaceRequests(client: LlmClient) =
   ## Hold consecutive request STARTS MinRequestSpacingSeconds apart.
