@@ -635,9 +635,19 @@ proc textOf(client: LlmClient, response: Response, error, url: string):
   for contentBlock in payload["content"]:
     if contentBlock{"type"}.getStr() == "text":
       result.add(contentBlock{"text"}.getStr())
-  if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
-    raise newException(HanabiError, "reply cut off at max_tokens before " &
-      "any JSON: " & headRunes(result, 160).replace("\n", " "))
+  if payload{"stop_reason"}.getStr() == "max_tokens":
+    let head = headRunes(result, 160).replace("\n", " ")
+    if '{' notin result:
+      raise newException(HanabiError, "reply cut off at max_tokens before " &
+        "any JSON: " & head)
+    ## The object started but the cap landed inside it. Name the cap as the
+    ## cause here, so a log line separates a truncated reply from a model
+    ## that genuinely emitted malformed JSON.
+    try:
+      discard extractJsonObject(result)
+    except CatchableError:
+      raise newException(HanabiError, "reply cut off at max_tokens " &
+        "mid-JSON: " & head)
 
 proc spaceRequests(client: LlmClient) =
   ## Hold consecutive request STARTS MinRequestSpacingSeconds apart.
