@@ -56,6 +56,17 @@
   var CARD_LETTER = { red: "R", yellow: "Y", green: "G", blue: "B", white: "W" };
   var WORDS = ["no", "one", "two", "three", "four", "five", "six", "seven"];
 
+  // The banner is the model's own SENTENCE, capped server-side at
+  // MaxBannerLen runes (src/hanabi/sim.nim:32). A sentence is never
+  // ellipsized, so the band that holds it is sized from THAT cap, measured in
+  // the font the tag is drawn in — never from a fraction of the canvas.
+  // BANNER_SAMPLE is the ruler: its mean glyph advance in the banner font is
+  // what a cap-length banner is assumed to cost per rune.
+  var MAX_BANNER_RUNES = 80;
+  var BANNER_LINES = 2;
+  var BANNER_MIN_SIZE = 7;
+  var BANNER_SAMPLE = "the quick brown fox jumps over a lazy dog, and back";
+
   // Effect timings.
   var HINT_MS = 1100;
   var FIZZLE_MS = 900;
@@ -129,6 +140,42 @@
       "px 'rajdhani', system-ui, sans-serif";
   }
 
+  // Runes, not UTF-16 code units: the server caps every string it hands the
+  // renderer on a rune boundary, so the renderer breaks them on one too.
+  function runesOf(text) {
+    var source = String(text);
+    var out = [];
+    for (var i = 0; i < source.length; i++) {
+      var code = source.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff && i + 1 < source.length) {
+        out.push(source.slice(i, i + 2));
+        i += 1;
+      } else {
+        out.push(source.charAt(i));
+      }
+    }
+    return out;
+  }
+
+  function bannerFont(size) {
+    return Math.round(size) + "px " + "-apple-system, BlinkMacSystemFont," +
+      " 'Segoe UI', system-ui, sans-serif";
+  }
+
+  // The width the RESERVED band needs so that a banner at the server's cap
+  // fits it in BANNER_LINES lines, measured in the banner's own font at this
+  // scale. One extra glyph per line pays for the ragged edge word wrap
+  // leaves. This is what keeps a full-cap sentence off the ellipsis path.
+  function bannerBandWidth(ctx, size) {
+    var previous = ctx.font;
+    ctx.font = bannerFont(size);
+    var perRune = ctx.measureText(BANNER_SAMPLE).width /
+      runesOf(BANNER_SAMPLE).length;
+    ctx.font = previous;
+    return Math.ceil(perRune * (MAX_BANNER_RUNES / BANNER_LINES + 1) +
+      size * 0.5 * 2);
+  }
+
   // ---- Layout --------------------------------------------------------------
 
   // A FIXED table: five fireworks, a discard strip and four hands of four,
@@ -136,7 +183,7 @@
   // board is in frame at every size and no zoom control is needed. Under
   // 560px the alias plates and the banner band collapse and the cards take
   // the room, which is what keeps the 360px featured-match iframe legible.
-  function computeLayout(width, height) {
+  function computeLayout(ctx, width, height) {
     var margin = Math.max(6, Math.min(14, width * 0.015));
     var compact = width < 560;
     var fireH = Math.max(50, Math.min(height * 0.20, 116));
@@ -146,11 +193,20 @@
     var rowH = rowsH / 4;
     var cogSize = Math.min(rowH * 0.82, width * (compact ? 0.11 : 0.09), 74);
     var plateW = compact ? 0 : Math.max(56, Math.min(width * 0.16, 132));
-    // The banner is laid out in a RESERVED band, never relative to something
-    // that can slide off the canvas: its width is computed from the server's
-    // own cap on the string, so a full-length banner always has room.
-    var bannerW = compact ? 0 : Math.max(96, Math.min(width * 0.22, 210));
     var slotsX = margin + cogSize + plateW + 6;
+    // The banner is laid out in a RESERVED band, never relative to something
+    // that can slide off the canvas: its width is measured from the server's
+    // own cap on the string in the font the tag is drawn in, so a full-length
+    // banner always has room and is never cut. The band still stops short of
+    // the hands — a tag that would eat them keeps the room it is given and
+    // steps its type down instead (drawBanner).
+    var bannerSize = Math.max(8, Math.min(rowH * 0.17, 13));
+    var bannerW = 0;
+    if (!compact) {
+      var handsW = 4 * (18 + 5);
+      bannerW = Math.max(0, Math.min(bannerBandWidth(ctx, bannerSize),
+        width - margin - slotsX - 8 - handsW));
+    }
     var slotsW = Math.max(48, width - margin - slotsX - bannerW -
       (bannerW > 0 ? 8 : 0));
     var cardW = Math.max(18, Math.min(slotsW / 4 - 5, rowH * 0.60, 96));
@@ -162,6 +218,7 @@
       disc: { x: margin, y: margin + fireH, w: width - margin * 2, h: discH },
       rowsTop: rowsTop, rowH: rowH, cogSize: cogSize, plateW: plateW,
       bannerW: bannerW, bannerX: width - margin - bannerW,
+      bannerSize: bannerSize,
       slotsX: slotsX, cardW: cardW, cardH: cardH
     };
   }
@@ -300,7 +357,7 @@
     var h = canvas.height;
     var seats = view.seats || [];
     var now = view.now || Date.now();
-    var L = computeLayout(w, h);
+    var L = computeLayout(ctx, w, h);
     var fx = view.effects || {};
 
     // Felt: the starter's floor tile, tinted.
@@ -517,7 +574,7 @@
     // The banner: a paper tag in the band reserved for it at the right.
     if (L.bannerW > 0 && data.banner) {
       drawBanner(ctx, L.bannerX, cy, L.bannerW, L.rowH, L.height,
-        data.banner);
+        data.banner, L.bannerSize);
     }
     ctx.restore();
   }
@@ -538,38 +595,63 @@
     ctx.restore();
   }
 
-  function wrapLines(ctx, text, maxWidth, maxLines) {
-    var words = String(text).split(/\s+/);
+  // Word wrap that never drops a rune: a single word too wide for the band is
+  // broken on a rune boundary rather than ellipsized. Ellipsis is for a
+  // LABEL in a fixed box (an alias plate); a banner is a sentence, and a cut
+  // sentence is a lost sentence.
+  function wrapLines(ctx, text, maxWidth) {
     var lines = [];
     var line = "";
-    words.forEach(function (word) {
+    function place(word) {
       var probe = line ? line + " " + word : word;
-      if (ctx.measureText(probe).width > maxWidth && line) {
-        lines.push(line);
-        line = word;
-      } else {
+      if (!line || ctx.measureText(probe).width <= maxWidth) {
         line = probe;
+        return;
       }
+      lines.push(line);
+      line = word;
+    }
+    String(text).split(/\s+/).forEach(function (word) {
+      if (!word) return;
+      if (ctx.measureText(word).width <= maxWidth) {
+        place(word);
+        return;
+      }
+      var chunk = "";
+      runesOf(word).forEach(function (rune) {
+        if (chunk && ctx.measureText(chunk + rune).width > maxWidth) {
+          place(chunk);
+          chunk = rune;
+        } else {
+          chunk += rune;
+        }
+      });
+      if (chunk) place(chunk);
     });
     if (line) lines.push(line);
-    var overflow = lines.length > maxLines;
-    lines = lines.slice(0, maxLines);
-    if (overflow && lines.length) {
-      lines[lines.length - 1] = ellipsize(ctx, lines[lines.length - 1] + "…",
-        maxWidth);
-    }
-    return lines.map(function (l) { return ellipsize(ctx, l, maxWidth); });
+    return lines;
   }
 
-  function drawBanner(ctx, x, cy, w, rowH, canvasH, text) {
+  function drawBanner(ctx, x, cy, w, rowH, canvasH, text, baseSize) {
     ctx.save();
-    var size = Math.max(8, Math.min(rowH * 0.17, 13));
-    ctx.font = Math.round(size) + "px " + "-apple-system, BlinkMacSystemFont," +
-      " 'Segoe UI', system-ui, sans-serif";
+    // The band was sized from the server's cap, so a cap-length banner lands
+    // in BANNER_LINES lines at the base size. Anything that still overflows
+    // the row — an unbroken alias, a wider-than-average glyph run — steps the
+    // type down until the WHOLE string fits. The text is never shortened.
+    var size = baseSize;
+    ctx.font = bannerFont(size);
     var pad = size * 0.5;
-    var lines = wrapLines(ctx, text, w - pad * 2, 2);
+    var lines = wrapLines(ctx, text, w - pad * 2);
     var lineH = size * 1.25;
     var h = lines.length * lineH + pad * 1.6;
+    while (h > rowH && size > BANNER_MIN_SIZE) {
+      size = Math.max(BANNER_MIN_SIZE, size - 1);
+      ctx.font = bannerFont(size);
+      pad = size * 0.5;
+      lines = wrapLines(ctx, text, w - pad * 2);
+      lineH = size * 1.25;
+      h = lines.length * lineH + pad * 1.6;
+    }
     // Clamped to the canvas: a banner is laid out in its own reserved band,
     // never relative to something that can slide off the frame.
     var top = Math.min(Math.max(cy - h / 2, 0), Math.max(0, canvasH - h));
