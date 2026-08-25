@@ -59,7 +59,7 @@ suite "chrome.css is the starter's file plus one appended block":
 
 suite "the pages are the starter's pages":
   test "every starter element survives, with its id, on both pages":
-    for path in ["client/replay.html", "replay-viewer/index.html",
+    for path in ["replay-viewer/index.html",
         "tools/ci/renderer_fixture.html"]:
       let page = read(path)
       for id in StarterIds:
@@ -77,7 +77,9 @@ suite "the pages are the starter's pages":
       check "--hudscale" in page
 
   test "the replay pages carry the fork's own wordmark and renderer":
-    for path in ["client/replay.html", "replay-viewer/index.html"]:
+    ## There is exactly ONE replay page: the static wasm bundle's. The pod
+    ## has no /client/replay route and no page behind it (r1 review F3).
+    for path in ["replay-viewer/index.html"]:
       let page = read(path)
       check "HANA<span>BI</span>" in page
       check "HanabiRenderer" in page
@@ -87,6 +89,16 @@ suite "the pages are the starter's pages":
     check "./static_replay.js" in bundle
     check "./chrome.css" in bundle
     check "./renderer.js" in bundle
+
+  test "the pod serves no replay path at all":
+    ## The static bundle is the ONLY viewer path: no /client/replay route,
+    ## no page behind it, no /replay websocket and no replay-server mode.
+    check not fileExists(RepoDir / "client/replay.html")
+    let server = read("src/hanabi/server.nim")
+    check "/client/replay" notin server
+    check "\"/replay\"" notin server
+    check "runReplayServer" notin server
+    check "replayMode" notin read("src/hanabi.nim")
 
 suite "the renderer's game block":
   test "no top-level name is defined twice":

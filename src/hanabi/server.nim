@@ -6,13 +6,15 @@
 ##   GET /healthz                    - liveness
 ##   GET /client/global              - spectator page
 ##   GET /client/player              - player page (view-only; policies are prompts)
-##   GET /client/replay              - replay page (replay mode)
 ##   GET /client/renderer.js         - shared table renderer
 ##   GET /client/chrome.css          - shared chrome
 ##   GET /client/assets/<name>       - sprites and fonts
 ##   WS  /player?slot=N&token=T      - player protocol (prompt delivery)
 ##   WS  /global                     - spectator snapshots
-##   WS  /replay                     - replay payload (replay mode)
+##
+## There is NO replay route and no replay-server mode: hosted replays are
+## served from the static wasm bundle (replay-viewer/, built by
+## tools/build_replay_viewer.sh), which is the only viewer path this game has.
 ##
 ## Player protocol (hanabi.player.v1), all JSON text frames:
 ##   game -> player: {"type":"welcome","protocol":"hanabi.player.v1",...}
@@ -62,7 +64,6 @@ var
   state: GameState
   gameServer: Server
   runtimeConfigGlobal: RuntimeConfig
-  replayPayloadGlobal: string
 
 initLock(stateLock)
 
@@ -144,12 +145,6 @@ proc replayPayload(gs: GameState, results: JsonNode): string =
   for player in gs.config.players:
     policyNames.add(player.name)
   $gs.sim.replayJson(results, policyNames)
-
-proc framesFromEvents(config: GameConfig, events: seq[GameEvent]): JsonNode =
-  ## One frame per event prefix, for scrubbing replays.
-  result = newJArray()
-  for frame in replayMatch(config, events):
-    result.add(frame.frameJson())
 
 proc finishEpisode(runtimeConfig: RuntimeConfig) =
   var results: JsonNode
@@ -406,12 +401,6 @@ proc globalUpgradeHandler(request: Request) {.gcsafe.} =
       state.globalSockets.incl(websocket)
       websocket.send($state.snapshotJson())
 
-proc replayUpgradeHandler(request: Request) {.gcsafe.} =
-  {.gcsafe.}:
-    let websocket = request.upgradeToWebSocket()
-    if replayPayloadGlobal.len > 0:
-      websocket.send(replayPayloadGlobal)
-
 proc websocketHandler(
   websocket: WebSocket,
   event: WebSocketEvent,
@@ -466,53 +455,15 @@ proc websocketHandler(
             state.playerSockets.del(slot)
         state.globalSockets.excl(websocket)
 
-proc buildRouter(replayMode: bool): Router =
+proc buildRouter(): Router =
   result.get("/healthz", healthzHandler)
   result.get("/client/global", htmlHandler("global.html"))
   result.get("/client/player", htmlHandler("player.html"))
-  result.get("/client/replay", htmlHandler("replay.html"))
   result.get("/client/renderer.js", rendererHandler)
   result.get("/client/chrome.css", chromeCssHandler)
   result.get("/client/assets/@name", assetHandler)
   result.get("/global", globalUpgradeHandler)
-  result.get("/replay", replayUpgradeHandler)
-  if not replayMode:
-    result.get("/player", playerUpgradeHandler)
-
-proc configFromReplay*(payload: JsonNode): GameConfig =
-  result = defaultGameConfig()
-  result.maxTurns = payload["config"]{"maxTurns"}.getInt(80)
-  result.seed = payload["config"]{"seed"}.getInt(0)
-  ## The replay carries the episode's fitted cap; never re-fit it. The deck
-  ## is re-derived from the seed.
-  result.sampled = true
-  for name in payload["names"]:
-    result.players.add(PlayerConfig(name: name.getStr()))
-
-proc runReplayServer*(runtimeConfig: RuntimeConfig) =
-  ## Replay mode: parse the recorded replay, precompute the scrub frames,
-  ## and serve the viewer until the platform tears the container down.
-  let payload = parseJson(runtimeConfig.replay)
-  let config = configFromReplay(payload)
-  var events: seq[GameEvent]
-  for node in payload["events"]:
-    events.add(eventFromJson(node))
-  var enriched = %*{
-    "type": "replay",
-    "protocol": payload{"protocol"}.getStr("hanabi.replay.v1"),
-    "names": payload["names"],
-    "policyNames": payload{"policyNames"},
-    "config": payload["config"],
-    "events": payload["events"],
-    "results": payload{"results"},
-    "frames": framesFromEvents(config, events)
-  }
-  replayPayloadGlobal = $enriched
-
-  let router = buildRouter(replayMode = true)
-  gameServer = newServer(router, websocketHandler)
-  echo "hanabi: replay mode on ", runtimeConfig.host, ":", runtimeConfig.port
-  gameServer.serve(Port(runtimeConfig.port), runtimeConfig.host)
+  result.get("/player", playerUpgradeHandler)
 
 proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
@@ -523,7 +474,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.scripted = newSeq[ScriptKind](config.players.len)
   runtimeConfigGlobal = runtimeConfig
 
-  let router = buildRouter(replayMode = false)
+  let router = buildRouter()
   gameServer = newServer(router, websocketHandler)
   createThread(gameThread, runGame, runtimeConfig)
   echo "hanabi: serving on ", runtimeConfig.host, ":", runtimeConfig.port

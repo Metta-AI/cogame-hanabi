@@ -1,5 +1,6 @@
-## Hanabi entrypoint: reads the Coworld runtime contract and starts either a
-## live episode server or a replay viewer server.
+## Hanabi entrypoint: reads the Coworld runtime contract and starts the live
+## episode server. There is no replay-server mode — hosted replays are served
+## from the static wasm bundle, which is this game's only viewer path.
 
 import
   std/[json, sysrand],
@@ -26,20 +27,17 @@ proc seedPinned(configJson: string): bool =
 when isMainModule:
   let runtimeConfig = readRuntimeConfig()
 
-  if runtimeConfig.replayMode:
-    runReplayServer(runtimeConfig)
-  else:
-    var config = defaultGameConfig()
-    config.update(runtimeConfig.config)
-    if not seedPinned(runtimeConfig.config):
-      ## An unpinned seed is randomized so the deal and the aliases are not
-      ## precomputable.
-      config.seed = randomSeed()
-      echo "hanabi: seed not pinned; randomized"
-    ## Fit the cap AFTER the seed is settled, so a pinned seed reproduces
-    ## the episode exactly.
-    config = sampleEpisode(config)
-    echo "hanabi: seats=", config.players.len,
-      " maxTurns=", config.maxTurns,
-      " seed=", config.seed
-    runGameServer(config, runtimeConfig)
+  var config = defaultGameConfig()
+  config.update(runtimeConfig.config)
+  if not seedPinned(runtimeConfig.config):
+    ## An unpinned seed is randomized so the deal and the aliases are not
+    ## precomputable.
+    config.seed = randomSeed()
+    echo "hanabi: seed not pinned; randomized"
+  ## Fit the cap AFTER the seed is settled, so a pinned seed reproduces
+  ## the episode exactly.
+  config = sampleEpisode(config)
+  echo "hanabi: seats=", config.players.len,
+    " maxTurns=", config.maxTurns,
+    " seed=", config.seed
+  runGameServer(config, runtimeConfig)

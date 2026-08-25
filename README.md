@@ -61,14 +61,14 @@ between turns (the score is the stacks as they stand).
 
 ## Layout
 
-- `src/hanabi.nim` — entrypoint (Coworld runtime contract, live vs replay mode)
+- `src/hanabi.nim` — entrypoint (Coworld runtime contract, live episode server)
 - `src/hanabi/sim.nim` — pure rules: the seeded deck and deal, the numbered
   turn resolution, the knowledge/candidate model, the hint annotation,
   endings, the FNV-1a digest and the replay re-derivation; shared by the
   server, the tests and the wasm viewer
 - `src/hanabi/llm.nim` — Claude client (one request per turn, one retry,
   then the fallback) + the two scripted baselines
-- `src/hanabi/server.nim` — mummy HTTP/WS server (player, global, replay)
+- `src/hanabi/server.nim` — mummy HTTP/WS server (player, global)
 - `src/hanabi_player.nim` — the prompt-delivery player (`PLAYER_PROMPT` /
   `PLAYER_SCRIPTED` env)
 - `client/` — the inherited bullwhip chrome (`chrome.css` byte for byte plus
