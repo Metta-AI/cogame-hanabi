@@ -106,7 +106,7 @@
           "type": "integer",
           "minimum": 256,
           "maximum": 2000,
-          "default": 800
+          "default": 900
         },
         "llmTimeoutSeconds": {
           "description": "Per-request timeout. Turns are sequential here, so this is deliberately short: two attempts plus the request-spacing floor must fit inside the 45s reserved before each turn.",
