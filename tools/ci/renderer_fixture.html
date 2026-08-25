@@ -65,10 +65,17 @@
   "use strict";
   var WIDTHS = [360, 720, 1280];
   var COLOURS = ["red", "yellow", "green", "blue", "white"];
+  // The server's own caps, from src/hanabi/sim.nim:32-34. Every string below
+  // is AT its cap, and assertFullLength (called on the built payload) fails
+  // the fixture if one is ever shortened: a quietly trimmed remark leaves
+  // this file green while testing nothing.
+  var MAX_BANNER_RUNES = 80;          // MaxBannerLen
+  var MAX_LEARNED_RUNES = 90;         // MaxLearnedLen
+  var MAX_LEARNED_LINES = 6;          // MaxLearnedLines
   var BANNER = "holding Widget-of-the-Long-Name's chop while the green four " +
-    "comes back around now";          // 80 runes exactly
+    "comes back round now";           // 80 runes exactly
   var NOTE_LINE = "Ratchet slot 1 is a 3 (candidates: red 3, green 3, blue 3, " +
-    "white 3) — hold it";              // 90 runes
+    "white 3) — hold it, do not toss"; // 90 runes exactly
   var NAMES = ["Sprocket", "Gizmo", "Ratchet", "Widget"];
   var POLICIES = ["hanabi-signaler-champion", "hanabi-reader-champion",
     "hanabi-conventions-filler", "hanabi-cautious-filler"];
@@ -189,6 +196,49 @@
       deckLeft: 0, endReason: "deckout", reason: "complete"
     }
   };
+
+  // ---- The fixture checks ITSELF -------------------------------------
+  // A worst-case fixture is only worth its runtime while its strings are
+  // still worst-case. These assertions tie the literals above to the caps
+  // the server enforces and to the payload actually handed to the renderer,
+  // so a future edit that shortens a remark turns the wasm-viewer job red
+  // (data-replay-error is what viewer_smoke.mjs fails on) instead of
+  // quietly leaving a fixture that draws comfortable little strings.
+  function runeLen(text) {
+    return Array.from(String(text)).length;
+  }
+  function fixtureFail(message) {
+    document.documentElement.setAttribute("data-replay-error",
+      "renderer fixture: " + message);
+    throw new Error("renderer fixture: " + message);
+  }
+  function assertFullLength(label, text, cap) {
+    if (runeLen(text) !== cap) {
+      fixtureFail(label + " is " + runeLen(text) + " runes, but the server " +
+        "caps it at " + cap + " and the fixture must exercise the cap");
+    }
+  }
+  assertFullLength("BANNER", BANNER, MAX_BANNER_RUNES);
+  assertFullLength("NOTE_LINE", NOTE_LINE, MAX_LEARNED_RUNES);
+  payload.frames.forEach(function (frame, index) {
+    frame.seats.forEach(function (s) {
+      assertFullLength("frame " + index + " seat " + s.seat + " banner",
+        s.banner, MAX_BANNER_RUNES);
+    });
+  });
+  var fullBlocks = 0;
+  payload.events.forEach(function (event) {
+    if (!event.learned || event.learned.length !== MAX_LEARNED_LINES) return;
+    event.learned.forEach(function (line, i) {
+      assertFullLength("turn " + event.turn + " learned line " + i, line,
+        MAX_LEARNED_RUNES);
+    });
+    fullBlocks += 1;
+  });
+  if (fullBlocks < 1) {
+    fixtureFail("no event carries a full " + MAX_LEARNED_LINES +
+      "-line learned block; the hint pane is not being exercised");
+  }
 
   var canvas = document.getElementById("table");
   var box = document.getElementById("layout");
