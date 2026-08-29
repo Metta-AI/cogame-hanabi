@@ -610,6 +610,24 @@ button.beat-marker {
 .feed-deckout { color: var(--paper); }
 .feed-end { color: var(--amber); font-weight: 700; }
 
+/* ---------- playback-speed chips (0.5× / 1× / 2×) ---------- */
+/* Same print language as the inherited .tbtn, but shorter, so adding the
+   row to .tbar does not change the transport height that --band measures. */
+.tspeed { display: flex; gap: 2px; }
+.tchip {
+  font-family: var(--pixfont);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--paper-dim);
+  background: rgba(242, 232, 216, 0.08);
+  border: none;
+  padding: 4px 7px;
+  cursor: pointer;
+  line-height: 1;
+}
+.tchip:hover { background: rgba(242, 232, 216, 0.2); }
+.tchip.on { color: var(--amber); box-shadow: inset 0 -2px 0 var(--amber); }
+
 /* ---------- small screens: the featured-match iframe is 360px ---------- */
 @media (max-width: 720px) {
   #hintpane { display: none; }
