@@ -140,6 +140,23 @@ suite "the renderer's game block":
     check "aria-label" in renderer
     check "marker.onclick" in renderer
 
+  test "replay playback pauses on Space and offers a half-speed chip":
+    ## Both live in attachReplay, so the static bundle, the CI fixture and
+    ## any future replay surface inherit them from the one renderer.
+    let renderer = read("client/renderer.js")
+    let css = read("client/chrome.css")
+    check "[0.5, 1, 2].forEach" in renderer
+    check "stepMs / speed" in renderer
+    check "evt.code !== \"Space\"" in renderer
+    check "evt.preventDefault()" in renderer
+    ## Typing somewhere must not toggle playback.
+    check "t.tagName === \"TEXTAREA\"" in renderer
+    check "t.isContentEditable" in renderer
+    ## The chips are styled, and only in the appended game block.
+    let appended = css[css.find(HanabiMarker) .. ^1]
+    check ".tchip.on" in appended
+    check ".tspeed" in appended
+
 suite "packaging agrees with itself":
   test "the manifest image placeholder matches the compose service":
     let compose = read("compose.yaml")
