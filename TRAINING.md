@@ -34,3 +34,23 @@ examples fit the Qwen2.5-0.5B-Instruct tokenizer in 4,096 tokens; the maximum
 was 3,115. One CPU optimizer step per variant with a local tiny model verifies
 the Metta post-training path. These examples distill the scripted teacher;
 they do not establish stronger league play.
+
+# Numeric reinforcement learning
+
+Compile the persistent bridge and pass its manifest and variant to Metta's
+`recipes.external.coworld.train` (native PufferLib) or
+`recipes.external.coworld_metta_rl.train` (Metta RL):
+
+```sh
+nim c -d:release --path:src -o:/tmp/hanabi-train-bridge tools/train_bridge.nim
+python tools/test_train_bridge.py /tmp/hanabi-train-bridge
+```
+
+Both certified variants expose 284 numeric observation values and 48 fixed
+move slots. The simulator's legality rule masks unavailable plays, discards,
+and hints. Numeric and semantic observations hide the acting seat's card
+identities while retaining public cards, hints, fireworks, and discards. The
+`conventions` policy supplies opponents and teacher labels. Terminal scores
+remain the native shared team score; training utilities give every seat the
+same signed value, `2 * team_score / 25 - 1`, so cooperative episodes yield
+a learning signal. Hosted prompts remain available to post-training.
