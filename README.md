@@ -30,12 +30,11 @@ discard pile, the tokens, the whole public move log and an enumerated list
 of every legal move — to Claude, and Claude answers with one JSON object
 copied from that list (plus an optional private `note` and a
 spectator-only `banner`). One request per turn, one retry on a rejected
-reply, then the scripted fallback. Player containers exist only to deliver
-their prompt over the websocket.
-With `PLAYER_JEV=1`, the server sends the same private observation and
-numbered legal moves to Jev SystemOne, validates the full probability
-distribution, and applies its highest-probability move. Jev does not
-generate a private note or spectator banner.
+reply, then the scripted fallback. Prompt player containers deliver their
+prompt over the websocket.
+With `PLAYER_JEV=1`, the player receives its private observation and legal
+moves through the same player protocol. It calls Jev SystemOne and returns
+its selected legal move. The game still checks legality and owns the result.
 
 Two built-in **scripted baselines** — `conventions` (play what you can
 prove, save a partner's last copy off its chop, otherwise give the hint that
@@ -142,8 +141,10 @@ uv run coworld upload-policy <hanabi image> --name my-hanabi \
 Or field a scripted baseline: same image, `--env PLAYER_SCRIPTED=conventions`
 or `--env PLAYER_SCRIPTED=cautious`.
 The Jev player uses `--env PLAYER_JEV=1`. Hosted episodes use the
-Bedrock sidecar; local episodes can set `TYPESAFE_API_KEY` in the game
-server environment. Run `tools/eval_jev.py` for matched local seeds and
+Bedrock sidecar; local episodes can set `TYPESAFE_API_KEY` in the player
+environment. Without a model transport, that player registers as the
+conventions baseline for offline certification. Run `tools/eval_jev.py`
+for matched local seeds and
 retained SystemOne request/response traces.
 
 The two pages worth reading before you write a prompt are

@@ -4,7 +4,7 @@
 ## policies. And the reply parser has to be tolerant in exactly the ways the
 ## design note lists, and strict everywhere else.
 
-import std/[json, monotimes, strutils, times, unicode, unittest]
+import std/[monotimes, strutils, times, unicode, unittest]
 import hanabi/[llm, sim]
 
 proc fixture(seed: int, maxTurns = 80): GameConfig =
@@ -87,7 +87,7 @@ suite "scripted baselines":
       let seat = seats[0]
       let scripted = [skNone, skCautious, skNone, skCautious]
       let decisions = client.decideAll(sim, seats, @["be bold", "", "", ""],
-        @scripted, @[false, false, false, false])
+        @scripted)
       check decisions.len == 1
       let kind = if scripted[seat] == skNone: skConventions else: scripted[seat]
       check sameMove(decisions[0].move, scriptedAction(sim, seat, kind).move)
@@ -95,26 +95,6 @@ suite "scripted baselines":
       sim.applyMove(seat, decisions[0].move, "", "", "scripted")
       turns += 1
     check turns == 12
-
-  test "Jev uses probability argmax over exact legal moves":
-    let sim = initSim(fixture(4))
-    let criteria = sim.jevCriteria()
-    check criteria.len == sim.legalMoves().len
-    var probabilities = newJObject()
-    for name, _ in criteria.pairs:
-      probabilities[name] = %0.0
-    probabilities["2"] = %1.0
-    let payload = %*{"answers": {"decision": {
-      "type": "choice", "choice": "1", "confidence": 0.5,
-      "probabilities": probabilities}},
-      "model": "jev-latest", "usage": {"input_tokens": 1,
-      "output_tokens": 1}}
-    let decision = sim.jevDecision(payload, criteria)
-    check sameMove(decision.move, sim.legalMoves()[1])
-    check decision.origin == "jev"
-    payload["answers"]["decision"]["probabilities"]["invalid"] = %0.0
-    expect HanabiError:
-      discard sim.jevDecision(payload, criteria)
 
 suite "reply parsing":
   proc parsed(sim: Sim, text: string): Decision =

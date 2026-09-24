@@ -16,8 +16,8 @@
 ## served from the static wasm bundle (replay-viewer/, built by
 ## tools/build_replay_viewer.sh), which is the only viewer path this game has.
 ##
-## Player protocol (hanabi.player.v1), all JSON text frames:
-##   game -> player: {"type":"welcome","protocol":"hanabi.player.v1",...}
+## Player protocol (hanabi.player.v2), all JSON text frames:
+##   game -> player: {"type":"welcome","protocol":"hanabi.player.v2",...}
 ##                   {"type":"state",...} after every event, REDACTED to the
 ##                   seat: its own hand appears as knowledge only, and no
 ##                   other seat's note, banner or policy name is in it
@@ -25,6 +25,10 @@
 ##   player -> game: {"type":"prompt","prompt":"...","scripted":"conventions"}
 ##                   (max 4000 runes; scripted plays a built-in baseline for
 ##                   that seat: "conventions" / "1", or "cautious")
+##   player -> game: {"type":"register","control":"external"}
+##   game -> external player: {"type":"observation","turn":N,
+##                   "observation":<seat-private frame>,"legalMoves":[...]}
+##   external player -> game: {"type":"action","turn":N,"action":<legal move>}
 
 import
   std/[json, locks, os, sets, strutils, tables, times, unicode],
@@ -53,7 +57,12 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
-    jev: seq[bool]
+    external: seq[bool]
+    registered: seq[bool]
+    awaitingSeat: int
+    awaitingTurn: int
+    pendingAction: Decision
+    hasPendingAction: bool
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -218,6 +227,17 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         break
       sleep(200)
 
+    let registerDeadline = epochTime() + 3.0
+    while epochTime() < registerDeadline:
+      var allRegistered = true
+      withLock stateLock:
+        for slot in 0 ..< config.tokens.len:
+          if state.playerSockets.hasKey(slot) and not state.registered[slot]:
+            allRegistered = false
+      if allRegistered:
+        break
+      sleep(20)
+
     withLock stateLock:
       state.started = true
       echo "hanabi: starting with ", state.playerSockets.len, "/",
@@ -252,7 +272,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seats: seq[int]
       var prompts: seq[string]
       var scripted: seq[ScriptKind]
-      var jev: seq[bool]
+      var seatExternal = false
       withLock stateLock:
         if state.sim.done:
           break
@@ -281,7 +301,20 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         prompts = state.prompts
         scripted = state.scripted
-        jev = state.jev
+        seatExternal = state.external[seats[0]] and
+          state.playerSockets.hasKey(seats[0])
+        if seatExternal:
+          let seat = seats[0]
+          state.awaitingSeat = seat
+          state.awaitingTurn = state.sim.turn
+          state.hasPendingAction = false
+          var legalMoves = newJArray()
+          for move in state.sim.legalMoves():
+            legalMoves.add(moveJson(move))
+          state.playerSockets[seat].send($ %*{
+            "type": "observation", "turn": state.sim.turn,
+            "observation": state.sim.playerFrameJson(seat, true),
+            "legalMoves": legalMoves})
         echo "hanabi: turn ", state.sim.turn, " of ", config.maxTurns,
           ", seat ", seats[0], " (", state.sim.names[seats[0]], ") at ",
           (epochTime() - gameStart).int, "s"
@@ -289,7 +322,26 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, one request for the acting seat) runs
       ## outside the lock on a snapshot; only this thread mutates the sim,
       ## so the snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted, jev)
+      var decisions: seq[Decision]
+      if seatExternal:
+        let actionDeadline = epochTime() + config.llmTimeoutSeconds.float
+        while epochTime() < actionDeadline:
+          var ready = false
+          withLock stateLock:
+            ready = state.hasPendingAction
+          if ready:
+            break
+          sleep(20)
+        withLock stateLock:
+          state.awaitingSeat = -1
+          if state.hasPendingAction:
+            decisions = @[state.pendingAction]
+          else:
+            var fallback = scriptedAction(simCopy, seats[0], skConventions)
+            fallback.origin = "fallback"
+            decisions = @[fallback]
+      else:
+        decisions = client.decideAll(simCopy, seats, prompts, scripted)
 
       withLock stateLock:
         for index, seat in seats:
@@ -389,7 +441,7 @@ proc playerUpgradeHandler(request: Request) {.gcsafe.} =
         state.playerSockets.len, "/", state.config.tokens.len, ")"
       websocket.send($ %*{
         "type": "welcome",
-        "protocol": "hanabi.player.v1",
+        "protocol": "hanabi.player.v2",
         "slot": slot,
         "name": state.sim.names[slot],
         "seats": Seats,
@@ -429,12 +481,30 @@ proc websocketHandler(
         return
       try:
         let payload = parseJson(message.data)
+        if payload{"type"}.getStr() == "register":
+          if payload["control"].getStr() != "external":
+            raise newException(HanabiError, "unknown player control")
+          withLock stateLock:
+            state.external[slot] = true
+            state.registered[slot] = true
+          return
+        if payload{"type"}.getStr() == "action":
+          withLock stateLock:
+            if state.external[slot] and state.awaitingSeat == slot and
+                state.awaitingTurn == payload["turn"].getInt():
+              var decision = parseDecision(state.sim, payload["action"])
+              let reason = state.sim.illegalReason(decision.move)
+              if reason.len > 0:
+                raise newException(HanabiError, reason)
+              decision.origin = "external"
+              state.pendingAction = decision
+              state.hasPendingAction = true
+          return
         if payload{"type"}.getStr() == "prompt":
           var prompt = payload{"prompt"}.getStr()
           if prompt.runeLen > MaxPromptLen:
             prompt = prompt.runeSubStr(0, MaxPromptLen)
           let node = payload{"scripted"}
-          let jev = payload{"jev"}.getBool()
           let scripted =
             if node.isNil: skNone
             elif node.kind == JBool: (if node.getBool(): skConventions
@@ -443,7 +513,8 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
-            state.jev[slot] = jev
+            state.external[slot] = false
+            state.registered[slot] = true
           echo "hanabi: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
             (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
@@ -477,7 +548,9 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
-  state.jev = newSeq[bool](config.players.len)
+  state.external = newSeq[bool](config.players.len)
+  state.registered = newSeq[bool](config.players.len)
+  state.awaitingSeat = -1
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter()
