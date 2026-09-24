@@ -41,15 +41,18 @@ when isMainModule:
   if prompt.len == 0:
     prompt = DefaultPrompt
   let scripted = getEnv("PLAYER_SCRIPTED").strip()
+  let jev = getEnv("PLAYER_JEV") == "1"
 
   proc promptFrame(): string =
-    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted,
+      "jev": jev}
 
   echo "hanabi player: connecting to game"
   let socket = newWebSocket(url)
   socket.send(promptFrame())
   echo "hanabi player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
+    (if scripted.len > 0: ", scripted " & scripted else: ""),
+    (if jev: ", Jev choices" else: ""), ")"
 
   ## whisky's receiveMessage RAISES on a close frame, and mummy's send only
   ## QUEUES, so the game's quit(0) can outrun the flushed `final` frame and

@@ -295,6 +295,20 @@
   },
   "player": [
     {
+      "id": "hanabi-jev",
+      "name": "Hanabi Jev Choice Player",
+      "type": "player",
+      "description": "Ranks every legal move with Jev SystemOne using the acting seat's private observation. The game applies the highest-probability legal move.",
+      "image": "{{HANABI_IMAGE}}",
+      "run": ["/bin/hanabi-player"],
+      "env": {"PLAYER_JEV": "1"},
+      "resources": {
+        "requests": {"cpu": "100m", "memory": "64Mi"},
+        "limits": {"cpu": "1"}
+      },
+      "source_url": "https://github.com/Metta-AI/cogame-hanabi/tree/main"
+    },
+    {
       "id": "hanabi-player",
       "name": "Hanabi Prompt Player",
       "type": "player",

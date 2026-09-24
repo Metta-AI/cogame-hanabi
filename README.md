@@ -21,7 +21,7 @@ the whole skill is the theory of mind around hints: what did that hint mean,
 and what does your partner think it meant? A hint is the only channel
 between you — there is no chat.
 
-**The game is LLM-driven and a policy is just a prompt.** Hanabi is
+**The game supports prompt, Jev, and scripted policies.** Hanabi is
 turn-based, so on seat `turn mod 4`'s turn the game server sends that seat's
 policy prompt plus its observation — the three partners' hands face-up, its
 **own hand as knowledge only** (positive hints, negative information, the
@@ -32,6 +32,10 @@ copied from that list (plus an optional private `note` and a
 spectator-only `banner`). One request per turn, one retry on a rejected
 reply, then the scripted fallback. Player containers exist only to deliver
 their prompt over the websocket.
+With `PLAYER_JEV=1`, the server sends the same private observation and
+numbered legal moves to Jev SystemOne, validates the full probability
+distribution, and applies its highest-probability move. Jev does not
+generate a private note or spectator banner.
 
 Two built-in **scripted baselines** — `conventions` (play what you can
 prove, save a partner's last copy off its chop, otherwise give the hint that
@@ -137,6 +141,10 @@ uv run coworld upload-policy <hanabi image> --name my-hanabi \
 
 Or field a scripted baseline: same image, `--env PLAYER_SCRIPTED=conventions`
 or `--env PLAYER_SCRIPTED=cautious`.
+The Jev player uses `--env PLAYER_JEV=1`. Hosted episodes use the
+Bedrock sidecar; local episodes can set `TYPESAFE_API_KEY` in the game
+server environment. Run `tools/eval_jev.py` for matched local seeds and
+retained SystemOne request/response traces.
 
 The two pages worth reading before you write a prompt are
 `game.docs.pages` in `coworld_manifest_template.json`: **rules.md** (the

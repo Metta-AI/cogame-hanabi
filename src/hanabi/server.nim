@@ -53,6 +53,7 @@ type
     sim: Sim
     prompts: seq[string]
     scripted: seq[ScriptKind]
+    jev: seq[bool]
     playerSockets: Table[int, WebSocket]
     socketSlots: Table[WebSocket, int]
     globalSockets: HashSet[WebSocket]
@@ -251,6 +252,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       var seats: seq[int]
       var prompts: seq[string]
       var scripted: seq[ScriptKind]
+      var jev: seq[bool]
       withLock stateLock:
         if state.sim.done:
           break
@@ -279,6 +281,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
         simCopy = state.sim
         prompts = state.prompts
         scripted = state.scripted
+        jev = state.jev
         echo "hanabi: turn ", state.sim.turn, " of ", config.maxTurns,
           ", seat ", seats[0], " (", state.sim.names[seats[0]], ") at ",
           (epochTime() - gameStart).int, "s"
@@ -286,7 +289,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       ## The slow part (Claude, one request for the acting seat) runs
       ## outside the lock on a snapshot; only this thread mutates the sim,
       ## so the snapshot cannot go stale.
-      let decisions = client.decideAll(simCopy, seats, prompts, scripted)
+      let decisions = client.decideAll(simCopy, seats, prompts, scripted, jev)
 
       withLock stateLock:
         for index, seat in seats:
@@ -431,6 +434,7 @@ proc websocketHandler(
           if prompt.runeLen > MaxPromptLen:
             prompt = prompt.runeSubStr(0, MaxPromptLen)
           let node = payload{"scripted"}
+          let jev = payload{"jev"}.getBool()
           let scripted =
             if node.isNil: skNone
             elif node.kind == JBool: (if node.getBool(): skConventions
@@ -439,6 +443,7 @@ proc websocketHandler(
           withLock stateLock:
             state.prompts[slot] = prompt
             state.scripted[slot] = scripted
+            state.jev[slot] = jev
           echo "hanabi: slot ", slot, " delivered a prompt (",
             prompt.len, " chars",
             (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
@@ -472,6 +477,7 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   state.sim = initSim(config)
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
+  state.jev = newSeq[bool](config.players.len)
   runtimeConfigGlobal = runtimeConfig
 
   let router = buildRouter()
