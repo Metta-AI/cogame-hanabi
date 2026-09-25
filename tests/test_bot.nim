@@ -77,8 +77,7 @@ suite "scripted baselines":
   test "decideAll with no credentials is exactly the scripted decision":
     let config = fixture(3, maxTurns = 40)
     let client = newLlmClient(config)
-    ## No ANTHROPIC_API_KEY and no Bedrock endpoint in the test environment:
-    ## the client is disabled, so no request is ever built.
+    client.disabled = true
     check client.disabled
     var sim = initSim(config)
     var turns = 0

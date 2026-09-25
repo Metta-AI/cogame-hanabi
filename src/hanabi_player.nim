@@ -1,11 +1,8 @@
-## Hanabi player: a policy is just a prompt.
+## Hanabi player: prompt, scripted, or external action policy.
 ##
-## Connects to the game, delivers its prompt (from PLAYER_PROMPT, or a
-## default Hanabi strategy), then idles until the final frame. All of the
-## actual decision making happens inside the game server, which sends this
-## seat's prompt — plus the partners' hands, this seat's own hand as
-## knowledge only, the public move log and the enumerated legal moves — to
-## Claude on this seat's turn.
+## Prompt policies deliver PLAYER_PROMPT for the game's existing Claude
+## adapter. PLAYER_JEV=1 receives seat observations and legal moves, calls
+## System One here, and sends a normal action back to the game.
 ##
 ## PLAYER_SCRIPTED=conventions (or 1) registers the seat as the built-in
 ## convention-following baseline instead; PLAYER_SCRIPTED=cautious as the
@@ -18,6 +15,7 @@
 
 import
   std/[json, options, os, strutils],
+  hanabi/jev_policy,
   whisky
 
 const DefaultPrompt = """
@@ -40,16 +38,26 @@ when isMainModule:
   var prompt = getEnv("PLAYER_PROMPT")
   if prompt.len == 0:
     prompt = DefaultPrompt
-  let scripted = getEnv("PLAYER_SCRIPTED").strip()
+  var scripted = getEnv("PLAYER_SCRIPTED").strip()
+  let jevRequested = getEnv("PLAYER_JEV") == "1"
+  let jev = jevRequested and (
+    getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME").strip().len > 0 or
+    getEnv("METTA_CAPTURE_URL").strip().len > 0 or
+    getEnv("TYPESAFE_API_KEY").strip().len > 0)
+  if jevRequested and not jev:
+    scripted = "conventions"
+    echo "hanabi player: no Jev transport; using conventions"
 
   proc promptFrame(): string =
-    $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
+    if jev: $ %*{"type": "register", "control": "external"}
+    else: $ %*{"type": "prompt", "prompt": prompt, "scripted": scripted}
 
   echo "hanabi player: connecting to game"
   let socket = newWebSocket(url)
   socket.send(promptFrame())
   echo "hanabi player: prompt delivered (", prompt.len, " chars",
-    (if scripted.len > 0: ", scripted " & scripted else: ""), ")"
+    (if scripted.len > 0: ", scripted " & scripted else: ""),
+    (if jev: ", Jev choices" else: ""), ")"
 
   ## whisky's receiveMessage RAISES on a close frame, and mummy's send only
   ## QUEUES, so the game's quit(0) can outrun the flushed `final` frame and
@@ -77,6 +85,12 @@ when isMainModule:
           echo "hanabi player: final score ", payload{"score"},
             " (", payload{"endReason"}.getStr(), ")"
           break
+        of "observation":
+          if jev:
+            let action = chooseAction(payload["observation"],
+              payload["legalMoves"], prompt)
+            socket.send($ %*{"type": "action", "turn": payload["turn"],
+              "action": action})
         else:
           discard
       except CatchableError as error:
