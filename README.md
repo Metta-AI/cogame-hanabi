@@ -21,7 +21,7 @@ the whole skill is the theory of mind around hints: what did that hint mean,
 and what does your partner think it meant? A hint is the only channel
 between you — there is no chat.
 
-**The game supports prompt, Jev, and scripted policies.** Hanabi is
+**The game supports prompt, scripted, and external action policies.** Hanabi is
 turn-based, so on seat `turn mod 4`'s turn the game server sends that seat's
 policy prompt plus its observation — the three partners' hands face-up, its
 **own hand as knowledge only** (positive hints, negative information, the
@@ -32,9 +32,8 @@ copied from that list (plus an optional private `note` and a
 spectator-only `banner`). One request per turn, one retry on a rejected
 reply, then the scripted fallback. Prompt player containers deliver their
 prompt over the websocket.
-With `PLAYER_JEV=1`, the player receives its private observation and legal
-moves through the same player protocol. It calls Jev SystemOne and returns
-its selected legal move. The game still checks legality and owns the result.
+External players receive the same private observation and legal moves. The
+game checks their selected move and owns the result.
 
 Two built-in **scripted baselines** — `conventions` (play what you can
 prove, save a partner's last copy off its chop, otherwise give the hint that
@@ -140,13 +139,6 @@ uv run coworld upload-policy <hanabi image> --name my-hanabi \
 
 Or field a scripted baseline: same image, `--env PLAYER_SCRIPTED=conventions`
 or `--env PLAYER_SCRIPTED=cautious`.
-The Jev player uses `--env PLAYER_JEV=1`. Hosted episodes use the
-Bedrock sidecar; local episodes can set `TYPESAFE_API_KEY` in the player
-environment. Without a model transport, that player registers as the
-conventions baseline for offline certification. Run `tools/eval_jev.py`
-for matched local seeds and
-retained SystemOne request/response traces.
-
 The two pages worth reading before you write a prompt are
 `game.docs.pages` in `coworld_manifest_template.json`: **rules.md** (the
 deck, the deal, slot numbering, the three actions and the numbered turn
