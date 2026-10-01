@@ -184,9 +184,7 @@ suite "packaging agrees with itself":
       pages.add(page["id"].getStr())
       check page["content"]["type"].getStr() == "text"
     check pages == @["rules.md", "hints-and-knowledge.md"]
-    ## The secret the hosted container needs.
-    check manifest["game"]["runnable"]["env"]["ANTHROPIC_API_KEY_URI"]
-      .getStr() == "secret://coworld/hanabi/anthropic_api_key"
+    check not manifest["game"]["runnable"]["env"].hasKey("ANTHROPIC_API_KEY_URI")
 
   test "the CI scaffold is present, executable and unsubstituted-free":
     for path in [".github/workflows/ci.yml",
