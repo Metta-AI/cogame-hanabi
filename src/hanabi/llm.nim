@@ -22,7 +22,8 @@
 ## scripted plays one deliberately, LLM or not.
 
 import
-  std/[json, os, strutils, times, unicode],
+  std/[json, options, os, strutils, times, unicode],
+  bitworld/decision_trajectory,
   bitworld/runtime,
   curly,
   sim
@@ -49,6 +50,7 @@ type
     skCautious = "cautious"
 
   Decision* = object
+    nativeAttempts*: seq[DecisionAttempt]
     move*: Move
     note*: string       ## private to the seat, fed back next turn
     banner*: string     ## spectator-only, never read by any seat
@@ -402,6 +404,11 @@ proc cleanText*(text: string, limit: int): string =
     return
   result = result.runeSubStr(0, limit - 1) & "…"
 
+proc decisionAction*(decision: Decision): JsonNode =
+  result = moveJson(decision.move)
+  result["note"] = %decision.note
+  result["banner"] = %decision.banner
+
 proc extractJsonObject*(text: string): JsonNode =
   ## Pulls the FIRST balanced {...} object out of a model reply, tolerating
   ## a UTF-8 BOM, markdown fences and trailing prose. parseJson alone raises
@@ -593,6 +600,7 @@ proc requestFor(client: LlmClient, system, user: string, slot: int):
     tuple[url: string, headers: HttpHeaders, body: string] =
   var body = %*{
     "max_tokens": client.maxOutputTokens,
+    "temperature": 0,
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
@@ -691,12 +699,14 @@ proc decideAll*(
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skConventions else: kind))
+      if kind == skNone: result[index].origin = "fallback"
     else:
       open.add(index)
   for attempt in 0 .. 1:
     if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
+    var evidenceByIndex = newSeq[DecisionAttempt](seats.len)
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
@@ -706,24 +716,39 @@ proc decideAll*(
           ". Reply with ONLY one JSON object copied from the LEGAL MOVES " &
           "list.")
       let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      evidenceByIndex[index] = newDecisionAttempt("attempt-" & $attempt, client.model, aoModel)
+      captureInferenceRequest(evidenceByIndex[index], parseJson(request.body), systemPrompt(sim, seat), user)
       batch.post(request.url, request.headers, request.body, $index)
     client.spaceRequests()
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence = evidenceByIndex[index]
+      let response = responses[position].response
+      var raw = ""
       try:
-        let text = client.textOf(responses[position].response,
+        captureInferenceResponse(evidence, response.body, response.code,
+          response.headers["x-softmax-llm-call-id"], response.headers["x-coworld-checkpoint-sha256"],
+          response.headers["x-coworld-tokenizer-sha256"], response.headers["x-coworld-chat-template-sha256"],
+          client.timeoutSeconds, 2)
+        raw = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
-        var decision = parseDecision(sim, extractJsonObject(text))
+        var decision = parseDecision(sim, extractJsonObject(raw))
         ## The legal-move list IS the rule: reject anything outside it here
         ## so the retry can quote exactly what was wrong.
         let reason = sim.illegalReason(decision.move)
         if reason.len > 0:
           raise newException(HanabiError, reason)
         decision.origin = if attempt == 0: "llm" else: "retry"
+        evidence.response = %raw
+        evidence.accepted = true
+        decision.nativeAttempts = result[index].nativeAttempts & @[evidence]
         result[index] = decision
       except CatchableError as error:
+        evidence.response = %raw
+        evidence.rejectionReason = some(error.msg)
+        result[index].nativeAttempts.add(evidence)
         echo "hanabi llm: seat ", seat, " attempt ", attempt, " rejected: ",
           error.msg
         rejects[index] = error.msg
@@ -732,6 +757,8 @@ proc decideAll*(
   for index in open:
     let seat = seats[index]
     echo "hanabi llm: seat ", seat, " falling back to the conventions baseline"
+    let retained = result[index].nativeAttempts
     result[index] = scriptedAction(sim, seat, skConventions)
+    result[index].nativeAttempts = retained
     result[index].origin = "fallback"
     result[index].reject = cleanText(rejects[index], MaxRejectLen)

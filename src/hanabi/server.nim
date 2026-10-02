@@ -31,7 +31,8 @@
 ##   external player -> game: {"type":"action","turn":N,"action":<legal move>}
 
 import
-  std/[json, locks, os, sets, strutils, tables, times, unicode],
+  std/[json, locks, options, os, sets, strutils, tables, times, unicode],
+  bitworld/decision_trajectory,
   bitworld/runtime,
   curly,
   mummy,
@@ -53,6 +54,7 @@ const
 
 type
   GameState = object
+    trajectory: Option[DecisionTrajectory]
     config: GameConfig
     sim: Sim
     prompts: seq[string]
@@ -190,6 +192,12 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       socket.send($final)
     state.broadcastLocked()
 
+  if state.trajectory.isSome:
+    state.trajectory.get().finish(
+      (if state.sim.reason == "deadline": esTruncated else: esCompleted),
+      results, results["scores"])
+    state.trajectory.get().writeEventsToUri(getEnv("COGAME_SAVE_TRAJECTORY_URI"))
+
   sleep(500)
   echo "hanabi: writing results and replay"
   writeArtifact(
@@ -293,7 +301,13 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             while not state.sim.done:
               let seat = state.sim.pendingSeats()[0]
               let decision = scriptedAction(state.sim, seat, skConventions)
+              let before = state.sim
               state.sim.applyMove(seat, decision.move, "", "", "scripted")
+              if state.trajectory.isSome:
+                state.trajectory.get().recordExecutedDecision($before.turn, $seat,
+                  config.players[seat].name, %*{"view": before.seatObservation(seat), "operator_prompt": state.prompts[seat],
+                "control": (if decision.origin == "external": "external" else: "internal")},
+                  decisionAction(decision), @[], aoFallback, terminal = state.sim.done)
           state.sim.endEarly()
           state.broadcastLocked()
           break
@@ -345,7 +359,8 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
 
       withLock stateLock:
         for index, seat in seats:
-          let decision = decisions[index]
+          var decision = decisions[index]
+          let before = state.sim
           echo "hanabi: turn ", state.sim.turn, " ", state.sim.names[seat],
             " ", moveText(decision.move), " (", decision.origin, ")",
             (if decision.reject.len > 0: " after: " & decision.reject
@@ -359,7 +374,22 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             echo "hanabi: move rejected (", error.msg,
               "); using the conventions baseline"
             let fallback = scriptedAction(state.sim, seat, skConventions)
+            let retained = decision.nativeAttempts
+            decision = fallback
+            decision.nativeAttempts = retained
+            decision.origin = "fallback"
             state.sim.applyMove(seat, fallback.move, "", "", "fallback")
+          if state.trajectory.isSome:
+            let origin =
+              if decision.origin == "fallback": aoFallback
+              elif decision.nativeAttempts.len > 0: aoModel
+              elif decision.origin == "external": aoUnknown
+              else: aoTeacher
+            state.trajectory.get().recordExecutedDecision($before.turn, $seat,
+              config.players[seat].name, %*{"view": before.seatObservation(seat), "operator_prompt": state.prompts[seat],
+                "control": (if decision.origin == "external": "external" else: "internal")},
+              decisionAction(decision), decision.nativeAttempts, origin,
+              systemPrompt(before, seat), userPrompt(before, seat, prompts[seat]), state.sim.done)
         state.broadcastLocked()
 
       ## Pace between turns so spectators can read the table.
@@ -496,6 +526,9 @@ proc websocketHandler(
               let reason = state.sim.illegalReason(decision.move)
               if reason.len > 0:
                 raise newException(HanabiError, reason)
+              if payload.hasKey("attempts"):
+                for attempt in payload["attempts"]:
+                  decision.nativeAttempts.add(readAttemptEvidence(attempt))
               decision.origin = "external"
               state.pendingAction = decision
               state.hasPendingAction = true
@@ -546,6 +579,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(HanabiError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  if getEnv("COGAME_SAVE_TRAJECTORY_URI").len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      $config.seed, "hanabi", getEnv("COWORLD_GAME_VERSION"),
+      getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   state.external = newSeq[bool](config.players.len)
