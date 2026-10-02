@@ -1,8 +1,7 @@
-## Export complete Hanabi games as Metta post-training examples.
-## Usage: nim r --path:src tools/export_posttrain.nim OUTPUT GAMES [FIRST_SEED] [VARIANT]
-
+## Export authoritative private language episodes; numeric bridges stay separate.
 import std/[json, os, osproc, strutils]
-import hanabi/[sim, llm]
+import bitworld/decision_trajectory
+import hanabi/[sim, llm, training]
 
 const OperatorPrompt = "Use public hints and your own card knowledge to build the fireworks safely."
 const Variants = ["standard", "sprint"]
@@ -15,77 +14,55 @@ when isMainModule:
   let games = parseInt(args[1])
   let firstSeed = if args.len >= 3: parseInt(args[2]) else: 1
   let variant = if args.len == 4: args[3] else: "standard"
-  if games < 10 or firstSeed < 1:
-    quit("at least ten games and a positive first seed are required", 1)
-  if variant notin Variants:
-    quit("unknown variant: " & variant, 1)
-  if dirExists(output) or fileExists(output):
-    quit("output already exists: " & output, 1)
+  doAssert games >= 10 and firstSeed >= 1 and variant in Variants
+  doAssert not dirExists(output) and not fileExists(output)
+  doAssert execProcess("git status --porcelain").strip().len == 0,
+    "Commit the qualified source before generating a pinned training corpus"
   createDir(output)
+  setFilePermissions(output, {fpUserRead, fpUserWrite, fpUserExec})
   let sourceRevision = execProcess("git rev-parse HEAD").strip()
   let manifest = parseFile("coworld_manifest_template.json")
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
-    if entry["id"].getStr() == variant:
-      variantConfig = entry["game_config"]
+    if entry["id"].getStr() == variant: variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil
-  var
-    trainRows: seq[string]
-    validationRows: seq[string]
-    runs = newJArray()
+  var runs = newJArray()
   for seed in firstSeed ..< firstSeed + games:
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
-    for seat in 0 ..< Seats:
-      runtimeConfig["tokens"].add(%("t" & $seat))
+    for seat in 0 ..< Seats: runtimeConfig["tokens"].add(%("t" & $seat))
     runtimeConfig["seed"] = %seed
     config.update($runtimeConfig)
     config = sampleEpisode(config)
     var sim = initSim(config)
-    var rows: seq[string]
+    let episodeId = "hanabi-" & variant & "-" & $seed
+    let trajectory = newDecisionTrajectory(episodeId, episodeId,
+      "hanabi", "source-" & sourceRevision, sourceRevision)
+    var selectedDecisionIds: seq[string]
     while not sim.done:
+      let before = sim
+      selectedDecisionIds.add("hanabi-" & $sim.turn)
       let seat = sim.pendingSeats()[0]
       let teacher = sim.scriptedAction(seat, skConventions)
-      var completion = moveJson(teacher.move)
-      completion["note"] = %teacher.note
-      completion["banner"] = %teacher.banner
-      let parsed = parseDecision(sim, completion)
-      doAssert sameMove(parsed.move, teacher.move)
-      doAssert sim.illegalReason(parsed.move) == ""
-      rows.add($(%*{
-        "episode_id": "hanabi-" & variant & "-" & $seed,
-        "seed": "hanabi-" & variant & "-" & $seed,
-        "decision_id": sim.turn,
-        "prompt": [
-          {"role": "system", "content": systemPrompt(sim, seat)},
-          {"role": "user", "content": userPrompt(sim, seat,
-            OperatorPrompt)}
-        ],
-        "completion": [{"role": "assistant", "content": $completion}],
-        "game": "hanabi",
-        "action_schema_revision": "hanabi-move-v1"
-      }))
+      let parsed = parseDecision(sim, teacher.decisionAction())
+      doAssert sameMove(parsed.move, teacher.move) and sim.illegalReason(parsed.move) == ""
       sim.applyMove(seat, parsed.move, parsed.note, parsed.banner, "scripted")
-    doAssert sim.reason == "complete" and rows.len > 0
+      trajectory.recordAppliedDecision(before, seat, teacher, teacher,
+        OperatorPrompt, sim.done)
+    doAssert sim.reason == "complete" and sim.turn > 0
     let outcome = sim.resultsJson()
-    if seed mod 5 == 0:
-      validationRows.add(rows)
-    else:
-      trainRows.add(rows)
-    runs.add(%*{"seed": seed, "decisions": rows.len,
-      "score": outcome["score"], "end_reason": outcome["endReason"]})
-  writeFile(output / "train.jsonl", trainRows.join("\n") & "\n")
-  writeFile(output / "validation.jsonl", validationRows.join("\n") & "\n")
-  writeFile(output / "manifest.json", pretty(%*{
-    "schema_version": 1,
-    "game": "hanabi",
-    "variant": variant,
-    "source_revision": sourceRevision,
-    "teacher": "scripted-conventions",
-    "operator_prompt": OperatorPrompt,
-    "train_examples": trainRows.len,
-    "validation_examples": validationRows.len,
-    "runs": runs
-  }) & "\n")
-  echo "train=", trainRows.len, " validation=", validationRows.len
+    var participants = newJObject()
+    for seat in 0 ..< outcome["scores"].len:
+      participants[$seat] = %*{"score": outcome["scores"][seat]}
+    trajectory.finish(esCompleted, outcome, participants)
+    let split = if seed mod 5 == 0: "validation" else: "train"
+    trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
+    runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "decisions": sim.turn,
+      "selected_decision_ids": selectedDecisionIds, "results": outcome, "score": outcome["score"], "end_reason": outcome["endReason"]})
+  writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
+    "format": "coworld-private-complete-episodes-v1", "game": "hanabi",
+    "variant": variant, "source_revision": sourceRevision,
+    "teacher_policy": "scripted-conventions", "operator_prompt": OperatorPrompt,
+    "runs": runs}) & "\n")
+  echo "complete episodes=", games

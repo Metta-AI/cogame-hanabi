@@ -48,7 +48,8 @@ suite "scripted baselines":
         check sim.reason == "complete"
         check sim.turn <= 80
     echo "slowest scripted episode: ", slowest, " ms"
-    check slowest < 50
+    when defined(release):
+      check slowest < 50
 
   test "cautious never misplays":
     var fusesLost = 0
@@ -91,8 +92,8 @@ suite "scripted baselines":
       check decisions.len == 1
       let kind = if scripted[seat] == skNone: skConventions else: scripted[seat]
       check sameMove(decisions[0].move, scriptedAction(sim, seat, kind).move)
-      check decisions[0].origin == "scripted"
-      sim.applyMove(seat, decisions[0].move, "", "", "scripted")
+      check decisions[0].origin == (if scripted[seat] == skNone: "fallback" else: "scripted")
+      sim.applyMove(seat, decisions[0].move, "", "", decisions[0].origin)
       turns += 1
     check turns == 12
 

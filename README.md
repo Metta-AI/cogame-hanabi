@@ -145,3 +145,8 @@ deck, the deal, slot numbering, the three actions and the numbered turn
 resolution) and **hints-and-knowledge.md** (the candidate model, what your
 observation contains and what it can never contain, the reply schema, and
 the two baselines' algorithms).
+
+## Language training
+
+See [private language training](docs/training.md) for complete episode export,
+explicit teacher targets, native checkpoint routing, and hosted private capture.

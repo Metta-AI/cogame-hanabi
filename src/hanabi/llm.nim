@@ -22,8 +22,9 @@
 ## scripted plays one deliberately, LLM or not.
 
 import
-  std/[json, os, strutils, times, unicode],
+  std/[json, options, os, strutils, times, unicode],
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
   sim
 
@@ -53,7 +54,9 @@ type
     note*: string       ## private to the seat, fed back next turn
     banner*: string     ## spectator-only, never read by any seat
     origin*: string     ## llm | retry | fallback | scripted
+    policy*: string     ## actual scripted teacher identity
     reject*: string     ## why the model's reply was refused, if it was
+    nativeAttempts*: seq[DecisionAttempt]
 
   LlmTransport = enum
     ltNone, ltSidecar, ltBedrock, ltAnthropic
@@ -310,9 +313,23 @@ proc cautiousMove*(sim: Sim, seat: int): Move =
 proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
   ## Rule-based baseline for `seat`. Always legal; never notes or banners.
   result.origin = "scripted"
+  result.policy = "scripted-" & $kind
+  # Partners see our cards, but we cannot use their resulting card-count
+  # deductions without knowing those cards ourselves. Choose from the same
+  # information boundary as the seat's private observation.
+  var visible = sim
+  for slot in 0 ..< visible.hands[seat].size:
+    visible.hands[seat].cards[slot].card = Card(colour: 0, rank: 0)
+  visible.deck = newSeq[Card](sim.deck.len)
+  visible.events = @[]
+  visible.config.seed = 0
+  for other in 0 ..< Seats:
+    if other != seat:
+      visible.notes[other] = ""
+      visible.banners[other] = ""
   result.move =
-    if kind == skCautious: cautiousMove(sim, seat)
-    else: conventionsMove(sim, seat)
+    if kind == skCautious: cautiousMove(visible, seat)
+    else: conventionsMove(visible, seat)
 
 # ---- Prompt building --------------------------------------------------------
 
@@ -596,6 +613,10 @@ proc requestFor(client: LlmClient, system, user: string, slot: int):
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
+  let temperature = parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "1"))
+  if not (temperature >= 0 and temperature <= 1):
+    raise newException(ValueError, "COWORLD_LLM_TEMPERATURE must be finite and between 0 and 1")
+  body["temperature"] = %temperature
   var headers: HttpHeaders
   if client.transport == ltSidecar and slot >= 0:
     headers["X-Coworld-Player-Slot"] = $slot
@@ -691,12 +712,16 @@ proc decideAll*(
     if kind != skNone or client.disabled:
       result[index] = scriptedAction(sim, seat,
         (if kind == skNone: skConventions else: kind))
+      if kind == skNone:
+        result[index].origin = "fallback"
+        result[index].reject = "Inference credentials unavailable"
     else:
       open.add(index)
   for attempt in 0 .. 1:
     if open.len == 0 or client.disabled:
       break
     var batch: RequestBatch
+    var pendingEvidence: seq[DecisionAttempt]
     for index in open:
       let seat = seats[index]
       var user = sim.userPrompt(seat, prompts[seat])
@@ -706,15 +731,62 @@ proc decideAll*(
           ". Reply with ONLY one JSON object copied from the LEGAL MOVES " &
           "list.")
       let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      var evidence = newDecisionAttempt("turn-" & $sim.turn & "-attempt-" & $attempt,
+        client.model, aoModel)
+      evidence.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat)},
+        {"role": "user", "content": user}]
+      evidence.request = parseJson(request.body)
+      evidence.model = some(client.model)
+      evidence.decoder = %*{"temperature": (if evidence.request.hasKey("temperature"): evidence.request["temperature"] else: newJNull()),
+        "max_tokens": client.maxOutputTokens, "timeout_ms": client.timeoutSeconds * 1000}
+      pendingEvidence.add(evidence)
       batch.post(request.url, request.headers, request.body, $index)
     client.spaceRequests()
+    let started = epochTime()
     let responses = client.curl.makeRequests(batch, client.timeoutSeconds)
     var stillOpen: seq[int]
     for position, index in open:
       let seat = seats[index]
+      var evidence = pendingEvidence[position]
+      evidence.latencyMs = some((epochTime() - started) * 1000)
+      let nativeResponse = responses[position].response
+      evidence.rawResponse = %nativeResponse.body
+      for (header, field) in [
+          ("x-softmax-llm-call-id", "call"),
+          ("x-coworld-checkpoint-sha256", "model"),
+          ("x-coworld-tokenizer-sha256", "tokenizer"),
+          ("x-coworld-chat-template-sha256", "template")]:
+        if nativeResponse.headers[header].len > 0:
+          case field
+          of "call": evidence.platformCallId = some(nativeResponse.headers[header])
+          of "model": evidence.modelIdentity = some(nativeResponse.headers[header])
+          of "tokenizer": evidence.tokenizerIdentity = some(nativeResponse.headers[header])
+          of "template": evidence.chatTemplateSha256 = some(nativeResponse.headers[header])
+      var text = ""
       try:
-        let text = client.textOf(responses[position].response,
+        if nativeResponse.code >= 200 and nativeResponse.code < 300 and responses[position].error.len == 0:
+          let payload = parseJson(nativeResponse.body)
+          evidence.rawResponse = payload
+          evidence.model = some(payload["model"].getStr())
+          evidence.stopReason = some(payload["stop_reason"].getStr())
+          evidence.inputTokens = some(payload["usage"]["input_tokens"].getInt())
+          evidence.outputTokens = some(payload["usage"]["output_tokens"].getInt())
+          if payload.hasKey("sampling_evidence") and payload["sampling_evidence"].kind != JNull:
+            let sampled = payload["sampling_evidence"]
+            var promptTokens, completionTokens: seq[int]
+            var probabilities: seq[float]
+            for token in sampled["prompt_token_ids"]: promptTokens.add(token.getInt())
+            for token in sampled["completion_token_ids"]: completionTokens.add(token.getInt())
+            if sampled["behavior_log_probs"].kind != JNull:
+              for probability in sampled["behavior_log_probs"]: probabilities.add(probability.getFloat())
+            evidence.promptTokenIds = some(promptTokens)
+            evidence.sampledTokenIds = some(completionTokens)
+            if sampled["behavior_log_probs"].kind != JNull:
+              evidence.behaviorLogprobs = some(probabilities)
+            evidence.stopReason = some(sampled["stop_reason"].getStr())
+        text = client.textOf(responses[position].response,
           responses[position].error, batch[position].url)
+        evidence.response = %text
         var decision = parseDecision(sim, extractJsonObject(text))
         ## The legal-move list IS the rule: reject anything outside it here
         ## so the retry can quote exactly what was wrong.
@@ -722,16 +794,26 @@ proc decideAll*(
         if reason.len > 0:
           raise newException(HanabiError, reason)
         decision.origin = if attempt == 0: "llm" else: "retry"
+        evidence.parsedAction = moveJson(decision.move)
+        evidence.parsedAction["note"] = %decision.note
+        evidence.parsedAction["banner"] = %decision.banner
+        evidence.accepted = true
+        result[index].nativeAttempts.add(evidence)
+        decision.nativeAttempts = result[index].nativeAttempts
         result[index] = decision
       except CatchableError as error:
-        echo "hanabi llm: seat ", seat, " attempt ", attempt, " rejected: ",
-          error.msg
+        evidence.response = %text
+        evidence.rejectionReason = some(error.msg)
+        result[index].nativeAttempts.add(evidence)
+        echo "hanabi llm: seat ", seat, " attempt ", attempt, " rejected"
         rejects[index] = error.msg
         stillOpen.add(index)
     open = stillOpen
   for index in open:
     let seat = seats[index]
     echo "hanabi llm: seat ", seat, " falling back to the conventions baseline"
+    let attempts = result[index].nativeAttempts
     result[index] = scriptedAction(sim, seat, skConventions)
+    result[index].nativeAttempts = attempts
     result[index].origin = "fallback"
     result[index].reject = cleanText(rejects[index], MaxRejectLen)

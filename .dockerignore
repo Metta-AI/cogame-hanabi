@@ -1,0 +1,9 @@
+.git
+out/
+training-data/
+train_dir/
+private/
+**/trajectory*.json*
+**/train.jsonl
+**/validation.jsonl
+**/*.jsonl
