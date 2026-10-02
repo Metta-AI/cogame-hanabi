@@ -365,17 +365,14 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
           let decision = decisions[index]
           var applied = decision
           echo "hanabi: turn ", state.sim.turn, " ", state.sim.names[seat],
-            " ", moveText(decision.move), " (", decision.origin, ")",
-            (if decision.reject.len > 0: " after: " & decision.reject
-             else: "")
+            " ", moveText(decision.move), " (", decision.origin, ")"
           try:
             state.sim.applyMove(seat, decision.move, decision.note,
               decision.banner, decision.origin)
           except HanabiError as error:
             ## Belt and braces: the decision path already validated against
             ## legalMoves, so this can only fire if the two disagree.
-            echo "hanabi: move rejected (", error.msg,
-              "); using the conventions baseline"
+            echo "hanabi: move rejected; using the conventions baseline"
             applied = scriptedAction(state.sim, seat, skConventions)
             applied.origin = "fallback"
             applied.reject = error.msg
@@ -542,7 +539,7 @@ proc websocketHandler(
             prompt.len, " chars",
             (if scripted != skNone: ", scripted " & $scripted else: ""), ")"
       except CatchableError as error:
-        echo "hanabi: ignoring bad player frame: ", error.msg
+        echo "hanabi: rejected player frame for seat ", slot
     of ErrorEvent:
       discard
     of CloseEvent:

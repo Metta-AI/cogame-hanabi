@@ -613,11 +613,10 @@ proc requestFor(client: LlmClient, system, user: string, slot: int):
     "system": system,
     "messages": [{"role": "user", "content": user}]
   }
-  let temperature = getEnv("COWORLD_LLM_TEMPERATURE")
-  if temperature.len > 0:
-    let configured = parseFloat(temperature)
-    doAssert configured >= 0 and configured <= 1
-    body["temperature"] = %configured
+  let temperature = parseFloat(getEnv("COWORLD_LLM_TEMPERATURE", "1"))
+  if not (temperature >= 0 and temperature <= 1):
+    raise newException(ValueError, "COWORLD_LLM_TEMPERATURE must be finite and between 0 and 1")
+  body["temperature"] = %temperature
   var headers: HttpHeaders
   if client.transport == ltSidecar and slot >= 0:
     headers["X-Coworld-Player-Slot"] = $slot
@@ -768,6 +767,7 @@ proc decideAll*(
         if nativeResponse.code >= 200 and nativeResponse.code < 300 and responses[position].error.len == 0:
           let payload = parseJson(nativeResponse.body)
           evidence.rawResponse = payload
+          evidence.model = some(payload["model"].getStr())
           evidence.stopReason = some(payload["stop_reason"].getStr())
           evidence.inputTokens = some(payload["usage"]["input_tokens"].getInt())
           evidence.outputTokens = some(payload["usage"]["output_tokens"].getInt())
@@ -805,8 +805,7 @@ proc decideAll*(
         evidence.response = %text
         evidence.rejectionReason = some(error.msg)
         result[index].nativeAttempts.add(evidence)
-        echo "hanabi llm: seat ", seat, " attempt ", attempt, " rejected: ",
-          error.msg
+        echo "hanabi llm: seat ", seat, " attempt ", attempt, " rejected"
         rejects[index] = error.msg
         stillOpen.add(index)
     open = stillOpen

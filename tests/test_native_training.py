@@ -14,7 +14,13 @@ root = Path(__file__).resolve().parents[1]
 
 with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
     binary = Path(temporary) / "probe"
-    command = [os.environ.get("NIM", "nim"), "c", "--path:src", "--out:" + str(binary)]
+    command = [
+        os.environ.get("NIM", "nim"),
+        "c",
+        "--path:src",
+        "--out:" + str(binary),
+        "--nimcache:" + str(Path(temporary) / "nimcache"),
+    ]
     if os.environ.get("NIM_TRAINING_FLAGS"):
         command += Path(os.environ["NIM_TRAINING_FLAGS"]).read_text().splitlines()
     command += ["tools/ci/native_training_probe.nim"]
@@ -28,18 +34,18 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
 
             def do_POST(self):
                 assert self.path == "/v1/messages"
-                request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                request = json.loads(
+                    self.rfile.read(int(self.headers["Content-Length"]))
+                )
                 assert self.headers["X-Coworld-Player-Slot"] == "0"
                 assert request["model"] == "checkpoint/native-fixture"
                 assert request["temperature"] == 0
-                assert "Exact private operator prompt" in request["messages"][0]["content"]
+                assert (
+                    "Exact private operator prompt" in request["messages"][0]["content"]
+                )
                 if self.captured_calls:
                     assert "previous reply" in request["messages"][0]["content"]
-                raw = (
-                    '{"action":"hint","target":0,"hintType":"rank","hintValue":1}'
-                    if GAME == "hanabi"
-                    else '{"move":"not-a-move"}'
-                )
+                raw = "PRIVATE REPLY SENTINEL: invalid JSON"
                 if self.captured_calls and self.case == "retry":
                     raw = (
                         '{"move":"play 1"}'
@@ -51,7 +57,7 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
                 body = json.dumps(
                     {
                         "id": call_id,
-                        "model": request["model"],
+                        "model": "served-checkpoint/native-fixture",
                         "content": [{"type": "text", "text": raw}],
                         "stop_reason": "end_turn",
                         "usage": {"input_tokens": 3, "output_tokens": 2},
@@ -87,21 +93,42 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
                 timeout=30,
             )
             assert result.returncode == 0, result.stderr
-            events = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
+            diagnostics = "\n".join(
+                line for line in result.stdout.splitlines() if not line.startswith("{")
+            )
+            assert "PRIVATE REPLY SENTINEL" not in diagnostics
+            events = [
+                json.loads(line)
+                for line in result.stdout.splitlines()
+                if line.startswith("{")
+            ]
             decision = events[0]
-            assert decision["action_status"] == ("accepted" if scenario == "retry" else "fallback")
+            assert decision["action_status"] == (
+                "accepted" if scenario == "retry" else "fallback"
+            )
             assert len(decision["attempts"]) == len(calls) == 2
-            for attempt, (request, call_id, raw) in zip(decision["attempts"], calls, strict=True):
+            for attempt, (request, call_id, raw) in zip(
+                decision["attempts"], calls, strict=True
+            ):
                 assert attempt["request"] == request
+                assert attempt["model"] == "served-checkpoint/native-fixture"
                 assert attempt["platform_call_id"] == call_id
                 assert attempt["prompt_token_ids"] == [10, 11]
                 assert attempt["sampled_token_ids"] == [12]
                 assert attempt["behavior_logprobs"] is None
                 assert attempt["raw_response"]["content"][0]["text"] == raw
-                assert attempt["prompt"][1]["content"] == request["messages"][0]["content"]
+                assert (
+                    attempt["prompt"][1]["content"] == request["messages"][0]["content"]
+                )
             if scenario == "retry":
-                assert decision["selected_attempt_id"] == decision["attempts"][1]["attempt_id"]
-                assert decision["executed_action"] == decision["attempts"][1]["parsed_action"]
+                assert (
+                    decision["selected_attempt_id"]
+                    == decision["attempts"][1]["attempt_id"]
+                )
+                assert (
+                    decision["executed_action"]
+                    == decision["attempts"][1]["parsed_action"]
+                )
             else:
                 assert decision["selected_attempt_id"] is None
                 assert decision["fallback_origin"].startswith("scripted-")
