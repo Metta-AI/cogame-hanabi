@@ -58,8 +58,8 @@ when isMainModule:
     trajectory.finish(esCompleted, outcome, participants)
     let split = if seed mod 5 == 0: "validation" else: "train"
     trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
-    runs.add(%*{"seed": seed, "split": split, "decisions": sim.turn,
-      "selected_decision_ids": selectedDecisionIds, "score": outcome["score"], "end_reason": outcome["endReason"]})
+    runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "decisions": sim.turn,
+      "selected_decision_ids": selectedDecisionIds, "results": outcome, "score": outcome["score"], "end_reason": outcome["endReason"]})
   writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
     "format": "coworld-private-complete-episodes-v1", "game": "hanabi",
     "variant": variant, "source_revision": sourceRevision,

@@ -11,7 +11,7 @@ assert manifest["format"] == "coworld-private-complete-episodes-v1"
 assert stat.S_IMODE(output.stat().st_mode) == 0o700
 seen = {"train": set(), "validation": set()}
 for run in manifest["runs"]:
-    path = output / run["split"] / ("hanabi-" + str(run["seed"]) + ".jsonl")
+    path = output / run["split"] / (run["episode_id"] + ".jsonl")
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     rows = [json.loads(line) for line in path.read_text().splitlines()]
     assert len(rows) == 1

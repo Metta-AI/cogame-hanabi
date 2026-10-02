@@ -46,6 +46,6 @@ and teacher labels do not supply those probabilities.
 
 The conventions teacher uses only the acting seat’s private information.
 Hidden own-card identities and deck order cannot influence its labels.
-The exporter includes standard and sprint variants, with whole episodes
+The exporter accepts standard or sprint as its optional fourth argument, with whole episodes
 assigned to train or validation by seed. The numeric bridge remains a
 separate research interface and does not qualify the hosted language path.

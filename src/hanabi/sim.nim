@@ -901,6 +901,7 @@ proc heldJson(view: View, basis: Basis, chop, seat, slot: int): JsonNode =
   }
 
 proc eventToJson*(event: GameEvent): JsonNode
+proc publicEventJson*(event: GameEvent): JsonNode
 
 proc frameJson*(sim: Sim): JsonNode =
   ## One object per timeline position; frames.len == events.len + 1. Frames
@@ -957,7 +958,7 @@ proc frameJson*(sim: Sim): JsonNode =
     "maxTurns": sim.config.maxTurns,
     "actor": (if sim.done: -1 else: sim.turn mod Seats),
     "score": sim.score(),
-    "move": (if sim.lastMove.kind == evMove: eventToJson(sim.lastMove)
+    "move": (if sim.lastMove.kind == evMove: publicEventJson(sim.lastMove)
              else: newJNull()),
     "log": log,
     "phase": $sim.phase,
@@ -1092,7 +1093,7 @@ proc replayJson*(sim: Sim, results: JsonNode, policyNames: seq[string]):
     JsonNode =
   ## The replay bytes, `hanabi.replay.v1`. Self-sufficient: the aliases, the
   ## policy names, the whole config INCLUDING the seed, every move with its
-  ## revealed card and its annotation, every note and banner, and the
+  ## revealed card and its annotation, public banners, and the
   ## results. Nothing but S3 is contacted to render it.
   var names = newJArray()
   for name in sim.names:
@@ -1102,7 +1103,7 @@ proc replayJson*(sim: Sim, results: JsonNode, policyNames: seq[string]):
     policies.add(%name)
   var events = newJArray()
   for event in sim.events:
-    events.add(eventToJson(event))
+    events.add(publicEventJson(event))
   %*{
     "protocol": "hanabi.replay.v1",
     "names": names,
@@ -1223,6 +1224,12 @@ proc stringSeq(node: JsonNode): seq[string] =
     return
   for value in node:
     result.add(value.getStr())
+
+proc publicEventJson*(event: GameEvent): JsonNode =
+  ## New public artifacts omit private notes; stored event readers stay intact.
+  result = event.eventToJson()
+  if event.kind == evMove and event.text.len > 0:
+    result.delete("text")
 
 proc eventFromJson*(node: JsonNode): GameEvent =
   result = GameEvent(
