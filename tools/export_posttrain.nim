@@ -37,7 +37,7 @@ when isMainModule:
     config = sampleEpisode(config)
     var sim = initSim(config)
     let episodeId = "hanabi-" & variant & "-" & $seed
-    let trajectory = newDecisionTrajectory(episodeId, episodeId,
+    let trajectory = newDecisionTrajectory(episodeId, "hanabi-" & $seed,
       "hanabi", "source-" & sourceRevision, sourceRevision)
     var selectedDecisionIds: seq[string]
     while not sim.done:

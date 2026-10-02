@@ -17,6 +17,7 @@ for run in manifest["runs"]:
     assert len(rows) == 1
     row = rows[0]
     assert row["episode"]["status"] == "completed"
+    assert row["episode"]["seed_family"] == "hanabi-" + str(run["seed"])
     assert row["episode"]["source_revision"] == manifest["source_revision"]
     assert row["episode"]["outcome"] == run["results"]
     decisions = row["decisions"]
