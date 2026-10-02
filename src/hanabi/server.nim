@@ -31,12 +31,14 @@
 ##   external player -> game: {"type":"action","turn":N,"action":<legal move>}
 
 import
-  std/[json, locks, os, sets, strutils, tables, times, unicode],
+  std/[json, locks, options, os, sets, strutils, tables, times, unicode],
   bitworld/runtime,
+  bitworld/decision_trajectory,
   curly,
   mummy,
   mummy/routers,
   llm,
+  training,
   sim
 
 const
@@ -68,6 +70,7 @@ type
     globalSockets: HashSet[WebSocket]
     started: bool
     finished: bool
+    trajectory: Option[DecisionTrajectory]
 
 var
   stateLock: Lock
@@ -165,6 +168,14 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
     state.finished = true
     results = state.sim.resultsJson()
     replayData = state.replayPayload(results)
+    if state.trajectory.isSome:
+      var outcomes = newJObject()
+      for seat in 0 ..< results["scores"].len:
+        outcomes[$seat] = %*{"score": results["scores"][seat]}
+      state.trajectory.get().finish(
+        if results["reason"].getStr() == "complete": esCompleted else: esTruncated,
+        results, outcomes)
+      state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
     ## worker tears player pods down as soon as results.json exists, and
@@ -292,8 +303,14 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               "baseline for the whole episode"
             while not state.sim.done:
               let seat = state.sim.pendingSeats()[0]
-              let decision = scriptedAction(state.sim, seat, skConventions)
-              state.sim.applyMove(seat, decision.move, "", "", "scripted")
+              let before = state.sim
+              var decision = scriptedAction(state.sim, seat, skConventions)
+              decision.origin = "fallback"
+              decision.reject = "Episode play deadline expired before first inference"
+              state.sim.applyMove(seat, decision.move, "", "", "fallback")
+              if state.trajectory.isSome:
+                state.trajectory.get().recordAppliedDecision(before, seat,
+                  decision, decision, state.prompts[seat], state.sim.done)
           state.sim.endEarly()
           state.broadcastLocked()
           break
@@ -346,6 +363,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
       withLock stateLock:
         for index, seat in seats:
           let decision = decisions[index]
+          var applied = decision
           echo "hanabi: turn ", state.sim.turn, " ", state.sim.names[seat],
             " ", moveText(decision.move), " (", decision.origin, ")",
             (if decision.reject.len > 0: " after: " & decision.reject
@@ -358,8 +376,13 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             ## legalMoves, so this can only fire if the two disagree.
             echo "hanabi: move rejected (", error.msg,
               "); using the conventions baseline"
-            let fallback = scriptedAction(state.sim, seat, skConventions)
-            state.sim.applyMove(seat, fallback.move, "", "", "fallback")
+            applied = scriptedAction(state.sim, seat, skConventions)
+            applied.origin = "fallback"
+            applied.reject = error.msg
+            state.sim.applyMove(seat, applied.move, "", "", "fallback")
+          if state.trajectory.isSome:
+            state.trajectory.get().recordAppliedDecision(simCopy, seat,
+              decision, applied, prompts[seat], state.sim.done)
         state.broadcastLocked()
 
       ## Pace between turns so spectators can read the table.
@@ -546,6 +569,10 @@ proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
     raise newException(HanabiError, "tokens and players must align")
   state.config = config
   state.sim = initSim(config)
+  if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
+    state.trajectory = some(newDecisionTrajectory(getEnv("COWORLD_EPISODE_ID"),
+      "hanabi-" & $config.seed, "hanabi",
+      getEnv("COWORLD_GAME_VERSION"), getEnv("COWORLD_SOURCE_REVISION")))
   state.prompts = newSeq[string](config.players.len)
   state.scripted = newSeq[ScriptKind](config.players.len)
   state.external = newSeq[bool](config.players.len)

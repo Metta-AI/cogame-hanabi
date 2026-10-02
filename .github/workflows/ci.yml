@@ -140,7 +140,7 @@ jobs:
               fi
               echo "::group::nim r ${flags} --path:src ${t}"
               # shellcheck disable=SC2086
-              if ! nim r ${flags} --path:src "${t}"; then
+              if ! nim r ${flags} --path:src --out:"/tmp/${m}-$(basename "${t}" .nim)" "${t}"; then
                 echo "::error::FAILED (${m}) ${t}"
                 fail=1
               fi
@@ -148,6 +148,15 @@ jobs:
             done
           done
           exit "${fail}"
+
+      - name: Complete private training corpus
+        run: |
+          nim c --hints:off -d:release --path:src --out:/tmp/export-posttrain tools/export_posttrain.nim
+          /tmp/export-posttrain /tmp/hanabi-training 10
+          python3 tests/test_training_corpus.py /tmp/hanabi-training
+
+      - name: Native language retry and private action joins
+        run: python3 tests/test_native_training.py
 
   # ---------------------------------------------------------------------
   # Packaging smoke: the production image builds, and one real episode runs

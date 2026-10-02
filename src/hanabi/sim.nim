@@ -1009,11 +1009,14 @@ proc seatObservation*(sim: Sim, seat: int, operator = ""): string =
   ## enumerated legal moves. Its own card identities, the deck, the other
   ## seats' notes and banners, the seed and every policy name are absent by
   ## construction — there is no code path that puts them here.
-  let view = sim.view()
+  var view = sim.view()
+  for slot in 0 ..< view.hands[seat].size:
+    view.hands[seat].cards[slot].card = Card(colour: 0, rank: 0)
   let size = view.hands[seat].size
   var lines: seq[string]
   lines.add("Turn " & $sim.turn & " of " & $sim.config.maxTurns &
-    " — your move. Score " & $sim.score() & "/25, hints " & $sim.hintTokens &
+    (if not sim.done and sim.turn mod Seats == seat: " — your move. Score "
+     else: " — waiting for your turn. Score ") & $sim.score() & "/25, hints " & $sim.hintTokens &
     "/" & $MaxHintTokens & ", fuses " & $sim.fuses & "/" & $MaxFuses &
     ", deck " & $sim.deck.len & ".")
   lines.add("You are " & sim.names[seat] & ", seat " & $seat & " of " &
@@ -1078,8 +1081,11 @@ proc seatObservation*(sim: Sim, seat: int, operator = ""): string =
   if operator.len > 0:
     lines.add(operator)
   lines.add("LEGAL MOVES (copy ONE of these objects exactly):")
-  for index, move in sim.legalMoves():
-    lines.add("  " & $(index + 1) & ". " & $moveJson(move))
+  if not sim.done and sim.turn mod Seats == seat:
+    for index, move in sim.legalMoves():
+      lines.add("  " & $(index + 1) & ". " & $moveJson(move))
+  else:
+    lines.add("  (none — you are not the acting seat)")
   lines.join("\n")
 
 proc replayJson*(sim: Sim, results: JsonNode, policyNames: seq[string]):
