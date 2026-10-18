@@ -5,7 +5,7 @@
 ## design note lists, and strict everywhere else.
 
 import std/[monotimes, strutils, times, unicode, unittest]
-import hanabi/[llm, sim]
+import hanabi/[llm, sim, prompts]
 
 proc fixture(seed: int, maxTurns = 80): GameConfig =
   result = defaultGameConfig()
@@ -88,7 +88,7 @@ suite "scripted baselines":
       let seat = seats[0]
       let scripted = [skNone, skCautious, skNone, skCautious]
       let decisions = client.decideAll(sim, seats, @["be bold", "", "", ""],
-        @scripted)
+        @scripted, PromptSelection())
       check decisions.len == 1
       let kind = if scripted[seat] == skNone: skConventions else: scripted[seat]
       check sameMove(decisions[0].move, scriptedAction(sim, seat, kind).move)

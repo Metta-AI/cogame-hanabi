@@ -1,5 +1,6 @@
-"""Check complete private episodes and explicit teacher targets."""
+"""Check complete private candidate games; independent review owns training admission."""
 
+import hashlib
 import json
 import stat
 import sys
@@ -7,40 +8,37 @@ from pathlib import Path
 
 output = Path(sys.argv[1])
 manifest = json.loads((output / "manifest.json").read_text())
-assert manifest["format"] == "coworld-private-complete-episodes-v1"
+assert manifest["format"] == "coworld-private-candidates-v1"
+assert manifest["review_required"]
 assert stat.S_IMODE(output.stat().st_mode) == 0o700
-seen = {"train": set(), "validation": set()}
+assert not (output / "train").exists() and not (output / "validation").exists()
+path = output / "trajectories.jsonl"
+assert stat.S_IMODE(path.stat().st_mode) == 0o600
+rows = [json.loads(line) for line in path.read_text().splitlines()]
+episodes = {row["episode_id"]: row for row in rows if row["event_type"] == "episode"}
+decisions = {}
+for row in rows:
+    if row["event_type"] == "decision":
+        decisions.setdefault(row["episode_id"], []).append(row)
+assert len(episodes) == len(manifest["runs"]) >= 10
 for run in manifest["runs"]:
-    path = output / run["split"] / (run["episode_id"] + ".jsonl")
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    rows = [json.loads(line) for line in path.read_text().splitlines()]
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["episode"]["status"] == "completed"
-    assert row["episode"]["seed_family"] == "hanabi-" + str(run["seed"])
-    assert row["episode"]["source_revision"] == manifest["source_revision"]
-    assert row["episode"]["outcome"] == run["results"]
-    decisions = row["decisions"]
-    assert decisions and decisions[-1]["terminal"]
-    chosen = set(run["selected_decision_ids"])
-    assert chosen
-    actual = set()
-    for decision in decisions:
-        if decision["decision_id"] in chosen:
-            selected = next(
-                a
-                for a in decision["attempts"]
-                if a["attempt_id"] == decision["selected_attempt_id"]
+    episode = episodes[run["episode_id"]]
+    assert episode["status"] == "completed"
+    assert episode["seed_family"] == "hanabi-" + str(run["seed"])
+    assert episode["source_revision"] == manifest["source_revision"]
+    assert episode["outcome"] == run["results"]
+    turns = decisions[run["episode_id"]]
+    assert len(turns) == run["decisions"] and turns[-1]["terminal"]
+    for row in turns:
+        (attempt,) = row["attempts"]
+        assert attempt["origin"] == "teacher" and attempt["accepted"]
+        assert attempt["policy"] == manifest["teacher_policy"]
+        assert row["executed_action"] == attempt["parsed_action"]
+        (metadata,) = row["observation"]["prompt_attempts"]
+        assert metadata["attempt_id"] == attempt["attempt_id"]
+        for message in attempt["prompt"]:
+            assert (
+                metadata["prompt_template"][message["role"] + "_sha256"]
+                == hashlib.sha256(message["content"].encode()).hexdigest()
             )
-            assert selected["origin"] == "teacher"
-            assert selected["policy"] == manifest["teacher_policy"]
-            assert selected["parsed_action"] == decision["executed_action"]
-            assert selected["prompt"]
-            actual.add(decision["decision_id"])
-    assert actual == chosen
-    seen[run["split"]].add(run.get("game", manifest["game"]))
-assert seen["train"] == seen["validation"]
-print(
-    "Complete episodes, private files, and selected teacher action joins passed:",
-    len(manifest["runs"]),
-)
+print(len(episodes), "complete private candidate games and actual teacher joins PASS")

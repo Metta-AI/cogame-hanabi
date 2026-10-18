@@ -26,7 +26,7 @@ import
   bitworld/runtime,
   bitworld/decision_trajectory,
   curly,
-  sim
+  sim, prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -333,12 +333,11 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
 
 # ---- Prompt building --------------------------------------------------------
 
-proc systemPrompt*(sim: Sim, seat: int): string =
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
   ## The mechanics, and nothing else. The system prompt teaches NO
   ## convention: reading an unfamiliar partner's convention is the thing
   ## being measured, so conventions belong in a policy's own prompt.
-  "You are " & sim.names[seat] & ", seat " & $seat &
-    " of four cogs playing Hanabi, a fully cooperative card game." &
+  selection.introduction(sim.names[seat] & ", seat " & $seat) &
     """
 
 The deck: 50 cards, five colours (red, yellow, green, blue, white), each
@@ -697,7 +696,8 @@ proc decideAll*(
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  selection: PromptSelection
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order — for Hanabi that list is
   ## always the single seat whose turn it is, so this is one request, at
@@ -730,10 +730,10 @@ proc decideAll*(
           cleanText(rejects[index], MaxRejectLen) &
           ". Reply with ONLY one JSON object copied from the LEGAL MOVES " &
           "list.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       var evidence = newDecisionAttempt("turn-" & $sim.turn & "-attempt-" & $attempt,
         client.model, aoModel)
-      evidence.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat)},
+      evidence.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
         {"role": "user", "content": user}]
       evidence.request = parseJson(request.body)
       evidence.model = some(client.model)
