@@ -1,14 +1,14 @@
 # Private language training
 
 The hosted game owns language requests, prompt construction, reply normalization,
-and action application. Five training introductions are available: canonical,
-plain, numbered, questions, and reordered. Two introductions, heldout-briefing
+and action application. Five training rule presentations are available: canonical,
+plain, numbered, questions, and reordered. Two presentations, heldout-briefing
 and heldout-reference, are evaluation-only. Original rules, hidden-hand views,
 legal moves, scoring, operator strategy, notes, and banners remain unchanged.
 
 Set game configuration `promptVariant` and nonnegative `promptSeed`. Canonical
 is the default. Mixed requires an explicit prompt seed and selects one of five
-training introductions independently of the deck seed. Selection stays fixed
+training rule presentations independently of the deck seed. Selection stays fixed
 throughout the episode and retries. It never enters public replay.
 
 The native Messages endpoint is `COWORLD_LLM_ENDPOINT`; set
@@ -33,11 +33,14 @@ python3 tests/test_training_corpus.py /tmp/hanabi-private-candidates
 ```
 
 The exporter supports standard and sprint, uses ordinary sampled rules, requires
-at least ten complete games, and rejects held-out wording. It writes private
-canonical candidate events, replay files, and a manifest with exact source
-revision. It does not assign training or validation labels. Independent review
-owns admission and seed-family splits. Mode and wording replicas share seed
-families to prevent split leakage. Existing output directories are rejected.
+at least ten complete games, and rejects held-out wording. Mixed exports cycle
+five wordings across games. The existing private complete-episode format retains
+selected teacher decisions and the exact source revision. Every fifth seed goes
+to validation; mode and wording replicas share seed families. Existing output
+directories are rejected. The `hanabi-rules-v2` bank varies complete mechanics
+and section order without introducing partner conventions. Canonical text and
+reply syntax stay exact.
+
 
 The persistent bridge accepts `MANIFEST [standard|sprint] [--language]`.
 Reset commands accept `promptVariant`, `promptSeed`, and `split`;

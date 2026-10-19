@@ -14,9 +14,9 @@ when isMainModule:
   let games = parseInt(args[1])
   let firstSeed = if args.len >= 3: parseInt(args[2]) else: 1
   let variant = if args.len >= 4: args[3] else: "standard"
-  let selection = promptSelection(if args.len == 6:
+  let configured = promptSelection(if args.len == 6:
     %*{"promptVariant": args[4], "promptSeed": parseInt(args[5])} else: newJObject())
-  doAssert selection.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference}, "held-out wording is evaluation only"
+  doAssert configured.selectedVariant notin {pvHeldoutBriefing, pvHeldoutReference}, "held-out wording is evaluation only"
   doAssert games >= 10 and firstSeed >= 1 and variant in Variants
   doAssert not dirExists(output) and not fileExists(output)
   doAssert execProcess("git status --porcelain").strip().len == 0,
@@ -30,8 +30,9 @@ when isMainModule:
     if entry["id"].getStr() == variant: variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil
   var runs = newJArray()
-  var events: seq[string]
   for seed in firstSeed ..< firstSeed + games:
+    var selection = configured
+    if selection.variant == pvMixed: selection.seed += seed - firstSeed
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -40,11 +41,13 @@ when isMainModule:
     config.update($runtimeConfig)
     config = sampleEpisode(config)
     var sim = initSim(config)
-    let episodeId = "hanabi-" & variant & "-" & $seed & "-" & $selection.selectedVariant
+    let episodeId = "hanabi-" & variant & "-" & $seed
     let trajectory = newDecisionTrajectory(episodeId, "hanabi-" & $seed,
       "hanabi", "source-" & sourceRevision, sourceRevision)
+    var selectedDecisionIds: seq[string]
     while not sim.done:
       let before = sim
+      selectedDecisionIds.add("hanabi-" & $sim.turn)
       let seat = sim.pendingSeats()[0]
       let teacher = sim.scriptedAction(seat, skConventions)
       let parsed = parseDecision(sim, teacher.decisionAction())
@@ -54,20 +57,16 @@ when isMainModule:
         OperatorPrompt, sim.done, selection)
     doAssert sim.reason == "complete" and sim.turn > 0
     let outcome = sim.resultsJson()
-    writePrivate(output / (episodeId & ".replay.json"),
-      $sim.replayJson(outcome, @["teacher-0", "teacher-1", "teacher-2", "teacher-3"]))
-    outcome["prompt_selection"] = selection.selectionMetadata()
     var participants = newJObject()
     for seat in 0 ..< outcome["scores"].len:
       participants[$seat] = %*{"score": outcome["scores"][seat]}
     trajectory.finish(esCompleted, outcome, participants)
-    events.add(trajectory.eventsJsonl().strip())
-    runs.add(%*{"episode_id": episodeId, "seed": seed, "decisions": sim.turn,
-      "results": outcome, "score": outcome["score"], "end_reason": outcome["endReason"]})
-  writePrivate(output / "trajectories.jsonl", events.join("\n") & "\n")
-  writePrivate(output / "manifest.json", pretty(%*{"schema_version": "1",
-    "format": "coworld-private-candidates-v1", "game": "hanabi",
-    "review_required": true, "prompt_selection": selection.selectionMetadata(),
+    let split = if seed mod 5 == 0: "validation" else: "train"
+    trajectory.writeCompleteEpisode(output / split / (episodeId & ".jsonl"))
+    runs.add(%*{"episode_id": episodeId, "seed": seed, "split": split, "decisions": sim.turn, "prompt_selection": selection.selectionMetadata(),
+      "selected_decision_ids": selectedDecisionIds, "results": outcome, "score": outcome["score"], "end_reason": outcome["endReason"]})
+  writeFile(output / "manifest.json", pretty(%*{"schema_version": "1",
+    "format": "coworld-private-complete-episodes-v1", "game": "hanabi",
     "variant": variant, "source_revision": sourceRevision,
     "teacher_policy": "scripted-conventions", "operator_prompt": OperatorPrompt,
     "runs": runs}) & "\n")

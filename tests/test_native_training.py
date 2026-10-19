@@ -40,6 +40,7 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
                 assert self.headers["X-Coworld-Player-Slot"] == "0"
                 assert request["model"] == "checkpoint/native-fixture"
                 assert request["temperature"] == 0
+                assert "TEAM SCORE" in request["system"]
                 assert (
                     "Exact private operator prompt" in request["messages"][0]["content"]
                 )
