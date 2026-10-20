@@ -30,9 +30,13 @@ when isMainModule:
     if entry["id"].getStr() == variant: variantConfig = entry["game_config"]
   doAssert not variantConfig.isNil
   var runs = newJArray()
+  var wordingCounts: array[2, int]
   for seed in firstSeed ..< firstSeed + games:
     var selection = configured
-    if selection.variant == pvMixed: selection.seed += seed - firstSeed
+    let partition = ord(seed mod 5 == 0)
+    if selection.variant == pvMixed:
+      selection.seed += wordingCounts[partition]
+      inc wordingCounts[partition]
     var config = defaultGameConfig()
     let runtimeConfig = copy(variantConfig)
     runtimeConfig["tokens"] = newJArray()
@@ -41,7 +45,8 @@ when isMainModule:
     config.update($runtimeConfig)
     config = sampleEpisode(config)
     var sim = initSim(config)
-    let episodeId = "hanabi-" & variant & "-" & $seed
+    let episodeId = "hanabi-" & variant & "-" & $seed & "-" &
+      selection.selectionMetadata()["variant"].getStr()
     let trajectory = newDecisionTrajectory(episodeId, "hanabi-" & $seed,
       "hanabi", "source-" & sourceRevision, sourceRevision)
     var selectedDecisionIds: seq[string]
