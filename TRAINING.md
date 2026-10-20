@@ -54,3 +54,6 @@ identities while retaining public cards, hints, fireworks, and discards. The
 remain the native shared team score; training utilities give every seat the
 same signed value, `2 * team_score / 25 - 1`, so cooperative episodes yield
 a learning signal. Hosted prompts remain available to post-training.
+
+Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
+split. Omitted, training, and unrecognized splits reject them.
