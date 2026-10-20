@@ -35,11 +35,11 @@ python3 tests/test_training_corpus.py /tmp/hanabi-private-candidates
 The exporter supports standard and sprint, uses ordinary sampled rules, requires
 at least ten complete games, and rejects held-out wording. Mixed exports cycle
 five wordings independently within training and validation. Episode IDs include
-wording to distinguish matched collections. The existing private complete-episode format retains
+requested selection, resolved wording, and prompt seed to distinguish matched collections. The existing private complete-episode format retains
 selected teacher decisions and the exact source revision. Every fifth seed goes
 to validation; mode and wording replicas share seed families. Existing output
-directories are rejected. The `hanabi-rules-v2` bank varies complete mechanics
-and section order without introducing partner conventions. Canonical text and
+directories are rejected. The `hanabi-rules-v3` bank uses independent explanations of complete mechanics
+and varies section order without introducing partner conventions. Canonical text and
 reply syntax stay exact.
 
 

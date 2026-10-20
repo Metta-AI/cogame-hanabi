@@ -46,7 +46,7 @@ when isMainModule:
     config = sampleEpisode(config)
     var sim = initSim(config)
     let episodeId = "hanabi-" & variant & "-" & $seed & "-" &
-      selection.selectionMetadata()["variant"].getStr()
+      $selection.variant & "-" & $selection.selectedVariant & "-" & $selection.seed
     let trajectory = newDecisionTrajectory(episodeId, "hanabi-" & $seed,
       "hanabi", "source-" & sourceRevision, sourceRevision)
     var selectedDecisionIds: seq[string]

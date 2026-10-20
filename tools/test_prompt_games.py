@@ -52,7 +52,7 @@ def play(binary, variant, wording, seed, language, prompt_seed=0, original=False
             view = observation["semantic_view"]
             if not original:
                 metadata = view.pop("prompt_template")
-                assert metadata["bank"] == "hanabi-rules-v2"
+                assert metadata["bank"] == "hanabi-rules-v3"
                 assert metadata["variant"] == (
                     TRAIN[prompt_seed % 5] if wording == "mixed" else wording
                 )

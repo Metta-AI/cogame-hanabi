@@ -19,14 +19,8 @@ rule. Parsed moves drive the simulator. Whole games stay in one split. The
 manifest records source revision, variant, team score, end reason, and row
 counts. Existing output directories are never overwritten.
 
-Train an output with Metta post-training:
-
-```sh
-nix develop -c uv run --package metta-posttrain --extra train \
-  python -m metta_posttrain.train --dataset /tmp/hanabi-standard \
-  --output /tmp/hanabi-adapter --model Qwen/Qwen3-0.6B \
-  --max-steps 100 --max-length 4096
-```
+Use the [post-training research package](https://github.com/Metta-AI/posttraining-research/tree/main/packages/metta-posttraining)
+for current training and adapter-packaging workflows.
 
 Ten complete games yielded 512 training and 125 validation examples for
 standard, and 384 training and 96 validation examples for sprint. All 1,117
