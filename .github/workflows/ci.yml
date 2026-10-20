@@ -152,8 +152,10 @@ jobs:
       - name: Complete private training corpus
         run: |
           nim c --hints:off -d:release --path:src --out:/tmp/export-posttrain tools/export_posttrain.nim
-          /tmp/export-posttrain /tmp/hanabi-training 10
+          /tmp/export-posttrain /tmp/hanabi-training 10 1 standard mixed 0
           python3 tests/test_training_corpus.py /tmp/hanabi-training
+          nim c --parallelBuild:1 -d:release --path:src --out:/tmp/hanabi-train-bridge tools/train_bridge.nim
+          python3 tools/test_prompt_games.py /tmp/hanabi-train-bridge
 
       - name: Native language retry and private action joins
         run: python3 tests/test_native_training.py

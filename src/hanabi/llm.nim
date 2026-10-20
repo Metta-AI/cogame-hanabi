@@ -26,7 +26,7 @@ import
   bitworld/runtime,
   bitworld/decision_trajectory,
   curly,
-  sim
+  sim, prompts
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
@@ -333,13 +333,7 @@ proc scriptedAction*(sim: Sim, seat: int, kind: ScriptKind): Decision =
 
 # ---- Prompt building --------------------------------------------------------
 
-proc systemPrompt*(sim: Sim, seat: int): string =
-  ## The mechanics, and nothing else. The system prompt teaches NO
-  ## convention: reading an unfamiliar partner's convention is the thing
-  ## being measured, so conventions belong in a policy's own prompt.
-  "You are " & sim.names[seat] & ", seat " & $seat &
-    " of four cogs playing Hanabi, a fully cooperative card game." &
-    """
+const CanonicalRules = """
 
 The deck: 50 cards, five colours (red, yellow, green, blue, white), each
 with ranks 1 1 1 2 2 3 3 4 4 5 — three 1s, two each of 2, 3 and 4, and a
@@ -380,13 +374,23 @@ limit.
 Your SCORE is the sum of the five stack heights, 0 to 25, and it is the SAME
 number for every seat — you win or lose together. Higher is better.
 
-OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis,
+"""
+const ReplyRules = """OUTPUT FORMAT: reply with ONLY one JSON object, nothing else — no analysis,
 no explanation, no markdown fences, no text before or after the object. Your
 reply must begin with the character { and end with }. Copy one entry from
 the LEGAL MOVES list exactly, and you may add "note" (at most 400
 characters, private to you, you will see it again next turn) and "banner"
 (at most 80 characters, shown to spectators only — your partners never see
 it)."""
+
+proc systemPrompt*(sim: Sim, seat: int, selection: PromptSelection): string =
+  ## Teach mechanics only; conventions belong to the operator's strategy.
+  result = selection.introduction(sim.names[seat] & ", seat " & $seat)
+  if selection.selectedVariant == pvCanonical:
+    result.add(CanonicalRules)
+  else:
+    result.add("\n\n" & selection.rulesBriefing() & "\n\n")
+  result.add(ReplyRules)
 
 proc operatorBlock*(prompt: string): string =
   if prompt.len == 0:
@@ -697,7 +701,8 @@ proc decideAll*(
   sim: Sim,
   seats: seq[int],
   prompts: seq[string],
-  scripted: seq[ScriptKind]
+  scripted: seq[ScriptKind],
+  selection: PromptSelection
 ): seq[Decision] =
   ## One decision per seat in `seats`, in order — for Hanabi that list is
   ## always the single seat whose turn it is, so this is one request, at
@@ -730,10 +735,10 @@ proc decideAll*(
           cleanText(rejects[index], MaxRejectLen) &
           ". Reply with ONLY one JSON object copied from the LEGAL MOVES " &
           "list.")
-      let request = client.requestFor(systemPrompt(sim, seat), user, seat)
+      let request = client.requestFor(systemPrompt(sim, seat, selection), user, seat)
       var evidence = newDecisionAttempt("turn-" & $sim.turn & "-attempt-" & $attempt,
         client.model, aoModel)
-      evidence.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat)},
+      evidence.prompt = %*[{"role": "system", "content": systemPrompt(sim, seat, selection)},
         {"role": "user", "content": user}]
       evidence.request = parseJson(request.body)
       evidence.model = some(client.model)

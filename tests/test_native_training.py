@@ -41,6 +41,10 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
                 assert request["model"] == "checkpoint/native-fixture"
                 assert request["temperature"] == 0
                 assert (
+                    "TEAM RESULT AND STOPPING\nYour score is identical to every partner's:"
+                    in request["system"]
+                )
+                assert (
                     "Exact private operator prompt" in request["messages"][0]["content"]
                 )
                 if self.captured_calls:

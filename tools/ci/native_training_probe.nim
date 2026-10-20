@@ -1,7 +1,7 @@
 ## Actual native batched client, parser normalization, and authoritative apply.
 import std/[json, options, os]
 import bitworld/decision_trajectory
-import hanabi/[llm, sim, training]
+import hanabi/[llm, sim, training, prompts]
 
 putEnv("COWORLD_LLM_ENDPOINT", paramStr(1))
 putEnv("COWORLD_LLM_MODEL", "checkpoint/native-fixture")
@@ -13,9 +13,9 @@ config.players = @[PlayerConfig(name: "a"), PlayerConfig(name: "b"),
 config.tokens = @["a", "b", "c", "d"]
 var game = initSim(config)
 let before = game
-let prompts = @["Exact private operator prompt", "", "", ""]
+let operatorPrompts = @["Exact private operator prompt", "", "", ""]
 let scripts = @[skNone, skNone, skNone, skNone]
-let decision = newLlmClient(config).decideAll(game, @[0], prompts, scripts)[0]
+let decision = newLlmClient(config).decideAll(game, @[0], operatorPrompts, scripts, PromptSelection(variant: pvMixed, seed: 4))[0]
 doAssert decision.nativeAttempts.len == 2
 doAssert not decision.nativeAttempts[0].accepted
 if paramStr(2) == "retry":
@@ -34,6 +34,6 @@ for attempt in decision.nativeAttempts:
   doAssert attempt.outputTokens.get() == 2
 game.applyMove(0, decision.move, decision.note, decision.banner, decision.origin)
 let trajectory = newDecisionTrajectory("probe", "probe", "hanabi", "fixture", "fixture-source")
-trajectory.recordAppliedDecision(before, 0, decision, decision, prompts[0], game.done)
+trajectory.recordAppliedDecision(before, 0, decision, decision, operatorPrompts[0], game.done, PromptSelection(variant: pvMixed, seed: 4))
 trajectory.finish(esTruncated, game.resultsJson(), %*{})
 echo trajectory.eventsJsonl()

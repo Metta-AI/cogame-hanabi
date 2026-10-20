@@ -39,6 +39,7 @@ import
   mummy/routers,
   llm,
   training,
+  prompts,
   sim
 
 const
@@ -55,6 +56,7 @@ const
 
 type
   GameState = object
+    selection: PromptSelection
     config: GameConfig
     sim: Sim
     prompts: seq[string]
@@ -172,9 +174,11 @@ proc finishEpisode(runtimeConfig: RuntimeConfig) =
       var outcomes = newJObject()
       for seat in 0 ..< results["scores"].len:
         outcomes[$seat] = %*{"score": results["scores"][seat]}
+      let privateOutcome = copy(results)
+      privateOutcome["prompt_selection"] = state.selection.selectionMetadata()
       state.trajectory.get().finish(
         if results["reason"].getStr() == "complete": esCompleted else: esTruncated,
-        results, outcomes)
+        privateOutcome, outcomes)
       state.trajectory.get().writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))
 
     ## Send final frames to players BEFORE writing artifacts: the hosted
@@ -310,7 +314,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
               state.sim.applyMove(seat, decision.move, "", "", "fallback")
               if state.trajectory.isSome:
                 state.trajectory.get().recordAppliedDecision(before, seat,
-                  decision, decision, state.prompts[seat], state.sim.done)
+                  decision, decision, state.prompts[seat], state.sim.done, state.selection)
           state.sim.endEarly()
           state.broadcastLocked()
           break
@@ -358,7 +362,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             fallback.origin = "fallback"
             decisions = @[fallback]
       else:
-        decisions = client.decideAll(simCopy, seats, prompts, scripted)
+        decisions = client.decideAll(simCopy, seats, prompts, scripted, state.selection)
 
       withLock stateLock:
         for index, seat in seats:
@@ -379,7 +383,7 @@ proc runGame(runtimeConfig: RuntimeConfig) {.gcsafe.} =
             state.sim.applyMove(seat, applied.move, "", "", "fallback")
           if state.trajectory.isSome:
             state.trajectory.get().recordAppliedDecision(simCopy, seat,
-              decision, applied, prompts[seat], state.sim.done)
+              decision, applied, prompts[seat], state.sim.done, state.selection)
         state.broadcastLocked()
 
       ## Pace between turns so spectators can read the table.
@@ -564,6 +568,7 @@ proc buildRouter(): Router =
 proc runGameServer*(config: GameConfig, runtimeConfig: RuntimeConfig) =
   if config.tokens.len != config.players.len:
     raise newException(HanabiError, "tokens and players must align")
+  state.selection = promptSelection(parseJson(runtimeConfig.config))
   state.config = config
   state.sim = initSim(config)
   if getEnv(CogameSaveTrajectoryUriEnv).len > 0:
