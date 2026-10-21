@@ -96,6 +96,7 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
             endpoint = "http://127.0.0.1:" + str(server.server_port)
             result = subprocess.run(
                 [str(binary), endpoint, scenario, hosted_model],
+                check=False,
                 cwd=root,
                 capture_output=True,
                 text=True,
