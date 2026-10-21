@@ -32,6 +32,7 @@ proc recordAppliedDecision*(trajectory: DecisionTrajectory, before: Sim,
     elif attempts[index].accepted:
       selected = some(attempts[index].attemptId)
   var observation = before.playerFrameJson(seat, true)
+  observation["operator_prompt"] = %operatorPrompt
   observation["prompt_selection"] = selection.selectionMetadata()
   var metadata = newJArray()
   for attempt in attempts:

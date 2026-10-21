@@ -57,3 +57,27 @@ play or prevention of training collapse. Matched learning comparisons remain
 unrun. Reinforcement learning requires actual sampled token IDs and draw-time
 behavior probabilities from the owned serving engine; greedy outputs and
 teacher labels do not provide them.
+
+
+## Source-owned native verification
+
+`tools/export_native_posttrain.py` joins a private applied-decision journal to
+the recorded native replay. Run it from the clean revision that produced the
+capture; every decision and terminal record must name that revision.
+
+```sh
+python3 tools/export_native_posttrain.py --replay /private/replay.json \
+  --trajectory /private/trajectory.jsonl --game-log /private/game.log \
+  --episode-id EPISODE_ID
+```
+
+The verifier reconstructs observations, selected rule wording, exact model
+requests including retries, applied actions and final scores. Operator prompts
+remain private capture metadata. The report hashes its inputs; a game-log hash
+is provenance, not an independent provider receipt or a model-quality claim.
+The tool does not approve teacher data or import it into a training campaign.
+
+Historical captures retain their original reader and source checkout, including
+`fc8acc5836ceb0898d457b79a3fc22cc03467656`. Do not rewrite their source identity or
+run them through the current producer. New captures use the current canonical
+producer and SDK decision format; no second capture writer is introduced.
