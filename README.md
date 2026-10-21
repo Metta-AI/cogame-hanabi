@@ -150,3 +150,13 @@ the two baselines' algorithms).
 
 See [private language training](docs/training.md) for complete episode export,
 explicit teacher targets, native checkpoint routing, and hosted private capture.
+
+## Pinning a hosted teacher model
+
+Set `hostedModel` in the game configuration (or an Experience Request's
+`game_config_overrides`) to the exact canonical `provider/model` name. It overrides
+`COWORLD_LLM_MODEL` for native game-owned calls and requires a sidecar endpoint.
+Omit it or use an empty string to retain existing environment/default behavior.
+The direct-provider `model` field is unchanged. Provider allowlists still apply;
+this does not route game calls through a player's separately registered endpoint.
+Use captured request and receipt identities to verify the actual served model.

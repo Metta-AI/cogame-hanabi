@@ -8,6 +8,7 @@ putEnv("COWORLD_LLM_MODEL", "checkpoint/native-fixture")
 putEnv("COWORLD_LLM_TEMPERATURE", "0")
 var config = defaultGameConfig()
 config.sampled = true
+config.hostedModel = paramStr(3)
 config.players = @[PlayerConfig(name: "a"), PlayerConfig(name: "b"),
   PlayerConfig(name: "c"), PlayerConfig(name: "d")]
 config.tokens = @["a", "b", "c", "d"]
