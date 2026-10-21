@@ -11,4 +11,4 @@ from native_fixture import qualify
 def action(user):
     return json.loads(re.search(r"LEGAL MOVES[^\n]*\n\s*1\. (\{[^\n]+\})", user)[1])
 
-qualify(binary, {'seed': 17, 'sampled': True, 'turnDelayMs': 0, 'player_connect_timeout_seconds': 3, 'episodeTimeoutSeconds': 120, 'maxOutputTokens': 900, 'llmTimeoutSeconds': 5, 'tokens': ['0', '1', '2', '3'], 'players': [{'name': 'fixture-0'}, {'name': 'fixture-1'}, {'name': 'fixture-2'}, {'name': 'fixture-3'}], 'maxTurns': 4}, action, output, revision)
+qualify(binary, {'seed': 17, 'promptVariant': 'mixed', 'promptSeed': 3, 'sampled': True, 'turnDelayMs': 0, 'player_connect_timeout_seconds': 3, 'episodeTimeoutSeconds': 120, 'maxOutputTokens': 900, 'llmTimeoutSeconds': 5, 'tokens': ['0', '1', '2', '3'], 'players': [{'name': 'fixture-0'}, {'name': 'fixture-1'}, {'name': 'fixture-2'}, {'name': 'fixture-3'}], 'maxTurns': 4}, action, output, revision)

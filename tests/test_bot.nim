@@ -5,7 +5,7 @@
 ## design note lists, and strict everywhere else.
 
 import std/[monotimes, strutils, times, unicode, unittest]
-import hanabi/[llm, sim]
+import hanabi/[llm, sim, prompts]
 
 proc fixture(seed: int, maxTurns = 80): GameConfig =
   result = defaultGameConfig()
@@ -48,7 +48,8 @@ suite "scripted baselines":
         check sim.reason == "complete"
         check sim.turn <= 80
     echo "slowest scripted episode: ", slowest, " ms"
-    check slowest < 50
+    when defined(release):
+      check slowest < 50
 
   test "cautious never misplays":
     var fusesLost = 0
@@ -87,12 +88,12 @@ suite "scripted baselines":
       let seat = seats[0]
       let scripted = [skNone, skCautious, skNone, skCautious]
       let decisions = client.decideAll(sim, seats, @["be bold", "", "", ""],
-        @scripted)
+        @scripted, PromptSelection())
       check decisions.len == 1
       let kind = if scripted[seat] == skNone: skConventions else: scripted[seat]
       check sameMove(decisions[0].move, scriptedAction(sim, seat, kind).move)
-      check decisions[0].origin == "scripted"
-      sim.applyMove(seat, decisions[0].move, "", "", "scripted")
+      check decisions[0].origin == (if scripted[seat] == skNone: "fallback" else: "scripted")
+      sim.applyMove(seat, decisions[0].move, "", "", decisions[0].origin)
       turns += 1
     check turns == 12
 

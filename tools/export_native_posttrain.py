@@ -14,17 +14,23 @@ parser.add_argument("--game-log", type=Path, required=True)
 parser.add_argument("--episode-id", required=True)
 args = parser.parse_args()
 source = Path(__file__).resolve().parent.parent
+assert not subprocess.check_output(["git", "status", "--porcelain"], cwd=source).strip(), (
+    "Verify from the clean source revision that produced the capture"
+)
+revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=source, text=True).strip()
 with tempfile.TemporaryDirectory(prefix="native-game-verifier-") as temporary:
     binary = Path(temporary) / "verify"
     subprocess.run([
-        "nim", "c", "--path:src", "--nimcache:" + temporary + "/cache",
+        "nim", "c", "--parallelBuild:1", "--path:src", "--nimcache:" + temporary + "/cache",
         "--out:" + str(binary), "tools/verify_native_posttrain.nim",
     ], cwd=source, check=True, stdout=subprocess.DEVNULL)
     report = json.loads(subprocess.check_output([
-        str(binary), str(args.replay.resolve()), str(args.trajectory.resolve()), args.episode_id,
+        str(binary), str(args.replay.resolve()), str(args.trajectory.resolve()), args.episode_id, revision,
     ], cwd=source))
 report.update(
     protocol="coworld.native-verification.v1",
+    source_revision=revision,
+    game_log_sha256=hashlib.sha256(args.game_log.read_bytes()).hexdigest(),
     replay_sha256=hashlib.sha256(args.replay.read_bytes()).hexdigest(),
     trajectory_sha256=hashlib.sha256(args.trajectory.read_bytes()).hexdigest(),
 )

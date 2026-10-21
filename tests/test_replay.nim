@@ -71,21 +71,24 @@ suite "artifacts":
     check reread["policyNames"].len == Seats
     check reread["results"]["scores"].len == Seats
 
-    ## Every recorded note and banner is capped on a rune boundary.
-    var sawText = false
+    ## Public replay preserves capped banners and omits private notes.
+    var sawBanner = false
     for node in reread["events"]:
       if node{"kind"}.getStr() != "move":
         continue
       let text = node{"text"}.getStr()
       let banner = node{"banner"}.getStr()
-      if text.len > 0:
-        sawText = true
-        check text.runeLen == MaxNoteLen
-        check text.validateUtf8() == -1
+      check text.len == 0
       if banner.len > 0:
+        sawBanner = true
         check banner.runeLen == MaxBannerLen
         check banner.validateUtf8() == -1
-    check sawText
+    check sawBanner
+    check "text" notin sim.frameJson()["move"]
+    for event in sim.events:
+      if event.kind == evMove:
+        check event.eventToJson()["text"].getStr().runeLen == MaxNoteLen
+        check "text" notin event.publicEventJson()
 
 suite "re-derivation":
   test "the replay re-derives every turn, annotation and digest":

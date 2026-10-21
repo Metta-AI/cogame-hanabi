@@ -2,9 +2,12 @@
 ## nim c -d:release --path:src -o:hanabi-train-bridge tools/train_bridge.nim
 
 import std/[json, os]
-import hanabi/[llm, sim]
+import hanabi/[llm, sim, training, prompts]
 
 const OperatorPrompt = "Use public hints and your own card knowledge to build the fireworks safely."
+var selection: PromptSelection
+var languageMode = false
+
 const ActionSlots = HandSize * 2 + Seats * (Colours + 5)
 
 proc seedOf(value: string): int =
@@ -36,10 +39,13 @@ proc visibleHands(game: Sim, seat: int): JsonNode =
 
 proc decision(game: Sim, id: int): JsonNode =
   let seat = game.turn mod Seats
+  let system = systemPrompt(game, seat, selection)
+  let user = userPrompt(game, seat, OperatorPrompt)
   %*{
     "kind": "decision", "game": "hanabi", "decision_id": id,
     "seat": seat, "engine_seat": seat, "turn": game.turn,
     "semantic_view": {
+      "prompt_template": selection.promptMetadata(system, user),
       "seat": seat, "turn": game.turn, "max_turns": game.config.maxTurns,
       "fireworks": game.fireworks, "hint_tokens": game.hintTokens,
       "fuses": game.fuses, "countdown": game.countdown,
@@ -48,12 +54,13 @@ proc decision(game: Sim, id: int): JsonNode =
     },
     "inbox": [],
     "messages": [
-      {"role": "system", "content": systemPrompt(game, seat)},
-      {"role": "user", "content": userPrompt(game, seat, OperatorPrompt)}
+      {"role": "system", "content": system},
+      {"role": "user", "content": user}
     ],
     "speech_messages": [],
     "action_schema": {"type": "object", "required": ["action"]},
-    "typed_question": newJNull()
+    "typed_question": newJNull(),
+    "inference_mode": (if languageMode: %"text_action" else: newJNull())
   }
 
 proc encoding(game: Sim, id: int): JsonNode =
@@ -110,9 +117,12 @@ proc encoding(game: Sim, id: int): JsonNode =
 
 when isMainModule:
   let args = commandLineParams()
-  if args.len notin 1 .. 2:
-    quit("usage: hanabi-train-bridge MANIFEST [standard|sprint]", 1)
-  let variant = if args.len == 2: args[1] else: "standard"
+  if args.len notin 1 .. 3:
+    quit("usage: hanabi-train-bridge MANIFEST [standard|sprint] [--language]", 1)
+  let variant = if args.len >= 2: args[1] else: "standard"
+  if args.len == 3:
+    doAssert args[2] == "--language"
+    languageMode = true
   let manifest = parseFile(args[0])
   var variantConfig: JsonNode
   for entry in manifest["variants"]:
@@ -127,6 +137,11 @@ when isMainModule:
     case request["kind"].getStr()
     of "reset":
       doAssert request["players"].getInt() == Seats
+      selection = promptSelection(request)
+      if selection.selectedVariant in {pvHeldoutBriefing, pvHeldoutReference}:
+        doAssert request.hasKey("split") and
+          request["split"].getStr() in ["evaluation", "validation", "test"],
+          "held-out wording requires an explicit evaluation split"
       var config = defaultGameConfig()
       let runtimeConfig = copy(variantConfig)
       runtimeConfig["tokens"] = %*["t0", "t1", "t2", "t3"]
@@ -142,7 +157,7 @@ when isMainModule:
     of "teacher":
       doAssert not game.done
       let teacher = game.scriptedAction(game.turn mod Seats, skConventions)
-      response = %*{"response": $moveJson(teacher.move)}
+      response = %*{"response": $(if languageMode: teacher.decisionAction() else: moveJson(teacher.move))}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
       let action = parseJson(request["response"].getStr())
@@ -164,7 +179,7 @@ when isMainModule:
           "utilities": utilities}
       else:
         observation = game.decision(id)
-      response = %*{"kind": "accepted", "action": action,
+      response = %*{"kind": "accepted", "action": (if languageMode: parsed.decisionAction() else: action),
         "observation": observation}
     else:
       raise newException(ValueError, "unknown command: " & request["kind"].getStr())
