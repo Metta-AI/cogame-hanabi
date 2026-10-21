@@ -136,6 +136,12 @@
           "type": "integer",
           "minimum": 0,
           "default": 0
+        },
+        "hostedModel": {
+          "type": "string",
+          "default": "",
+          "pattern": "^$|^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$",
+          "description": "Explicit canonical model for native hosted sidecar calls. Overrides COWORLD_LLM_MODEL; empty preserves the environment/default. Requires the hosted sidecar. Direct-provider model is separate."
         }
       }
     },

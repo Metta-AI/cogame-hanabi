@@ -25,12 +25,17 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
         command += Path(os.environ["NIM_TRAINING_FLAGS"]).read_text().splitlines()
     command += ["tools/ci/native_training_probe.nim"]
     subprocess.run(command, cwd=root, check=True, capture_output=True, text=True)
-    for scenario in ["retry", "fallback"]:
+    for scenario, hosted_model in [
+        (case, model)
+        for model in ["", "checkpoint/pinned-fixture"]
+        for case in ["retry", "fallback"]
+    ]:
         calls = []
 
         class NativeHandler(BaseHTTPRequestHandler):
             captured_calls = calls
             case = scenario
+            expected_model = hosted_model or "checkpoint/native-fixture"
 
             def do_POST(self):
                 assert self.path == "/v1/messages"
@@ -38,7 +43,7 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
                     self.rfile.read(int(self.headers["Content-Length"]))
                 )
                 assert self.headers["X-Coworld-Player-Slot"] == "0"
-                assert request["model"] == "checkpoint/native-fixture"
+                assert request["model"] == self.expected_model
                 assert request["temperature"] == 0
                 assert (
                     "TEAM RESULT AND STOPPING\nYour score is identical to every partner's:"
@@ -90,7 +95,7 @@ with tempfile.TemporaryDirectory(prefix=GAME + "-native-") as temporary:
         try:
             endpoint = "http://127.0.0.1:" + str(server.server_port)
             result = subprocess.run(
-                [str(binary), endpoint, scenario],
+                [str(binary), endpoint, scenario, hosted_model],
                 cwd=root,
                 capture_output=True,
                 text=True,
