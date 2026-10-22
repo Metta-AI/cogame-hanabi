@@ -131,6 +131,7 @@ when isMainModule:
   doAssert not variantConfig.isNil, "unknown variant: " & variant
   var game: Sim
   var id = 0
+  var auditScenario: JsonNode
   while not stdin.endOfFile:
     let request = parseJson(stdin.readLine())
     var response: JsonNode
@@ -150,7 +151,25 @@ when isMainModule:
       config = sampleEpisode(config)
       game = initSim(config)
       id = 0
+      # Private split audit only: never attach hidden state to a decision.
+      var cards = newJArray()
+      for hand in game.hands:
+        for index in 0 ..< hand.size:
+          cards.add(%*[hand.cards[index].card.colour, hand.cards[index].card.rank])
+      for card in game.deck:
+        cards.add(%*[card.colour, card.rank])
+      let family = %*{"initial_cards": cards}
+      auditScenario = %*{"protocol": "coworld.native-scenario-audit.v1",
+        "game": "hanabi", "seed": request["seed"].getStr(),
+        "engine_seed": game.config.seed, "family": family}
       response = game.decision(id)
+    of "audit_scenario":
+      if getEnv("METTA_SCENARIO_AUDIT") != "1":
+        response = %*{"kind": "error", "reason": "scenario audit is disabled"}
+      elif auditScenario.isNil:
+        response = %*{"kind": "error", "reason": "reset is required before scenario audit"}
+      else:
+        response = auditScenario
     of "encode":
       doAssert not game.done
       response = game.encoding(id)
