@@ -160,10 +160,21 @@ when isMainModule:
       response = %*{"response": $(if languageMode: teacher.decisionAction() else: moveJson(teacher.move))}
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
-      let action = parseJson(request["response"].getStr())
-      let parsed = parseDecision(game, action)
+      var action: JsonNode
+      var parsed: Decision
       let seat = game.turn mod Seats
-      doAssert game.illegalReason(parsed.move) == ""
+      try:
+        action = parseJson(request["response"].getStr())
+        parsed = parseDecision(game, action)
+        let reason = game.illegalReason(parsed.move)
+        if reason.len > 0:
+          raise newException(HanabiError, reason)
+      except CatchableError as error:
+        response = %*{"kind": "rejected", "reason": error.msg,
+          "observation": game.decision(id)}
+        stdout.writeLine($response)
+        stdout.flushFile()
+        continue
       game.applyMove(seat, parsed.move, parsed.note, parsed.banner)
       inc id
       var observation: JsonNode
