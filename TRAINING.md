@@ -51,3 +51,15 @@ a learning signal. Hosted prompts remain available to post-training.
 
 Held-out bridge wordings require an explicit `evaluation`, `validation`, or `test`
 split. Omitted, training, and unrecognized splits reject them.
+
+## Explicit teacher policy queries
+
+The native bridge accepts `{"kind":"teacher","policy":"cautious"}`. Available
+policies are `conventions`, `cautious`, and `reckless` (the first public legal
+move, playing slot one). Replies include `response`, `policy`, and
+`decision_id`. Invalid selectors return an error without advancing state or
+consuming an action retry. Queries without a policy retain their existing
+response shape and conventions behavior. Conventions/cautious retain the
+existing seat-visibility scrub; reckless uses only the public legal-move list.
+These scripted references support teacher-diversity research; score rankings
+require actual native measurements.
