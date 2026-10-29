@@ -175,8 +175,24 @@ when isMainModule:
       response = game.encoding(id)
     of "teacher":
       doAssert not game.done
-      let teacher = game.scriptedAction(game.turn mod Seats, skConventions)
-      response = %*{"response": $(if languageMode: teacher.decisionAction() else: moveJson(teacher.move))}
+      let explicit = request.hasKey("policy")
+      if explicit and request["policy"].kind != JString:
+        response = %*{"kind": "error", "reason": "teacher policy must be a string"}
+      else:
+        let selected = if explicit: request["policy"].getStr() else: "conventions"
+        if selected notin ["conventions", "cautious", "reckless"]:
+          response = %*{"kind": "error", "reason": "unknown teacher policy"}
+        else:
+          let teacher = case selected
+            of "cautious": game.scriptedAction(game.turn mod Seats, skCautious)
+            # legalMoves is the same public list shown to this seat. Its first
+            # action plays slot one, without inspecting that card's identity.
+            of "reckless": Decision(move: game.legalMoves()[0], origin: "scripted", policy: "scripted-reckless")
+            else: game.scriptedAction(game.turn mod Seats, skConventions)
+          response = %*{"response": $(if languageMode: teacher.decisionAction() else: moveJson(teacher.move))}
+          if explicit:
+            response["policy"] = %selected
+            response["decision_id"] = %id
     of "step":
       doAssert not game.done and request["decision_id"].getInt() == id
       var action: JsonNode
